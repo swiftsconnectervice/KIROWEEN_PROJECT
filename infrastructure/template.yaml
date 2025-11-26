@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: FrankenStack - Legacy-to-AI Connector Infrastructure
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: nodejs20.x
+    Environment:
+      Variables:
+        NODE_ENV: production
+        LOG_LEVEL: info
+        AS400_HOST: !Ref AS400Host
+        AS400_PORT: !Ref AS400Port
+        AS400_TIMEOUT: 5000
+        RATE_LIMIT_MAX_REQUESTS: 5
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+  
+  AS400Host:
+    Type: String
+    Default: localhost
+    Description: AS/400 host address
+  
+  AS400Port:
+    Type: Number
+    Default: 23
+    Description: AS/400 TN5250 port
+
+Resources:
+  # Lambda Function for ClaimRevenant Agent
+  ClaimRevenantFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub frankenstack-claim-agent-${Environment}
+      CodeUri: ../
+      Handler: src/lambda/claim-handler.handler
+      Description: ClaimRevenant agent for processing insurance claims
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+      Events:
+        ProcessClaimApi:
+          Type: Api
+          Properties:
+            Path: /claims/process
+            Method: POST
+            RestApiId: !Ref FrankenstackApi
+        BatchProcessApi:
+          Type: Api
+          Properties:
+            Path: /claims/batch
+            Method: POST
+            RestApiId: !Ref FrankenstackApi
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/frankenstack-*
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource: !GetAtt ClaimsTable.Arn
+      Tags:
+        Project: FrankenStack
+        Component: ClaimAgent
+
+  # Lambda Function for AS/400 MCP Server
+  AS400MCPFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub frankenstack-as400-mcp-${Environment}
+      CodeUri: ../
+      Handler: src/lambda/mcp-handler.handler
+      Description: AS/400 MCP server for legacy system integration
+      Timeout: 60
+      MemorySize: 1024
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+      Events:
+        QueryApi:
+          Type: Api
+          Properties:
+            Path: /mcp/query
+            Method: POST
+            RestApiId: !Ref FrankenstackApi
+        HealthCheckApi:
+          Type: Api
+          Properties:
+            Path: /mcp/health
+            Method: GET
+            RestApiId: !Ref FrankenstackApi
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref AS400Credentials
+      Tags:
+        Project: FrankenStack
+        Component: MCPServer
+
+  # API Gateway
+  FrankenstackApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub frankenstack-api-${Environment}
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"
+      Auth:
+        ApiKeyRequired: true
+      Tags:
+        Project: FrankenStack
+
+  # API Key
+  FrankenstackApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub frankenstack-api-key-${Environment}
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref FrankenstackApi
+          StageName: !Ref Environment
+
+  # Usage Plan
+  FrankenstackUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub frankenstack-usage-plan-${Environment}
+      ApiStages:
+        - ApiId: !Ref FrankenstackApi
+          Stage: !Ref Environment
+      Throttle:
+        RateLimit: 100
+        BurstLimit: 200
+      Quota:
+        Limit: 10000
+        Period: DAY
+
+  # Link API Key to Usage Plan
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref FrankenstackApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref FrankenstackUsagePlan
+
+  # DynamoDB Table for Claims
+  ClaimsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub frankenstack-claims-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: claimId
+          AttributeType: S
+        - AttributeName: policyNumber
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: N
+      KeySchema:
+        - AttributeName: claimId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: PolicyNumberIndex
+          KeySchema:
+            - AttributeName: policyNumber
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Project
+          Value: FrankenStack
+        - Key: Component
+          Value: Database
+
+  # Secrets Manager for AS/400 Credentials
+  AS400Credentials:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub frankenstack-as400-credentials-${Environment}
+      Description: AS/400 system credentials
+      SecretString: !Sub |
+        {
+          "host": "${AS400Host}",
+          "port": ${AS400Port},
+          "username": "MCPUSER",
+          "password": "CHANGE_ME_IN_CONSOLE"
+        }
+      Tags:
+        - Key: Project
+          Value: FrankenStack
+
+  # CloudWatch Log Groups
+  ClaimAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/frankenstack-claim-agent-${Environment}
+      RetentionInDays: 7
+
+  MCPServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/frankenstack-as400-mcp-${Environment}
+      RetentionInDays: 7
+
+  # CloudWatch Alarms
+  ClaimAgentErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub frankenstack-claim-agent-errors-${Environment}
+      AlarmDescription: Alert when claim agent has high error rate
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ClaimRevenantFunction
+
+  MCPServerLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub frankenstack-mcp-latency-${Environment}
+      AlarmDescription: Alert when MCP server latency is high
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref AS400MCPFunction
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${FrankenstackApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub frankenstack-api-endpoint-${Environment}
+
+  ApiKey:
+    Description: API Key ID (retrieve value from console)
+    Value: !Ref FrankenstackApiKey
+
+  ClaimAgentFunctionArn:
+    Description: ClaimRevenant Lambda Function ARN
+    Value: !GetAtt ClaimRevenantFunction.Arn
+    Export:
+      Name: !Sub frankenstack-claim-agent-arn-${Environment}
+
+  MCPServerFunctionArn:
+    Description: AS/400 MCP Server Lambda Function ARN
+    Value: !GetAtt AS400MCPFunction.Arn
+    Export:
+      Name: !Sub frankenstack-mcp-server-arn-${Environment}
+
+  ClaimsTableName:
+    Description: DynamoDB Claims Table Name
+    Value: !Ref ClaimsTable
+    Export:
+      Name: !Sub frankenstack-claims-table-${Environment}
+
+  AS400CredentialsArn:
+    Description: Secrets Manager ARN for AS/400 credentials
+    Value: !Ref AS400Credentials
+    Export:
+      Name: !Sub frankenstack-as400-credentials-arn-${Environment}

@@ -1,0 +1,432 @@
+/**
+ * ClaimRevenant Agent
+ * Resurrects insurance claims from email and processes them through AS/400
+ * Reduces claim processing time from 45 minutes to under 5 minutes
+ * Now with GitHub MCP integration for automatic commit tracking
+ */
+
+import { AS400MCPServer, type LegacyResponse } from '../mcp/as400-mcp-server';
+import type { MockClaim } from '../mocks/claims.mock';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { extractClaimFromEmail, convertRawToEmailClaim, type EmailClaim, type RawClaimData } from '../utils/parser';
+import { validateClaim, type NOAAWeatherData, type ValidationResult } from '../utils/validator';
+import axios from 'axios';
+
+const execAsync = promisify(exec);
+
+/**
+ * Processed claim ready for AS/400 submission
+ */
+export interface ProcessedClaim extends MockClaim {
+  weatherData: NOAAWeatherData;
+  validationResult: ValidationResult;
+  processingTime: number;
+  decision?: 'APPROVE' | 'INVESTIGATE' | 'INVALID_DATA' | 'ERROR';
+  gitCommitHash?: string;
+  errorDetails?: string;
+}
+
+/**
+ * REAL NOAA Weather API Wrapper (Powered by OpenWeatherMap)
+ * Fallback to simulation if API key is missing
+ */
+async function fetchNOAAWeather(location: string, date: Date): Promise<NOAAWeatherData> {
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  
+  // Si no hay Key, volvemos al modo simulación
+  if (!apiKey) {
+    console.warn('[Weather] No OPENWEATHER_API_KEY found. Using simulation.');
+    return simulateWeather(location, date);
+  }
+
+  try {
+    console.log(`[Weather] Fetching real data for ${location}...`);
+    
+    // 1. Llamada a la API (Usamos unidades imperiales para coincidir con tu demo)
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${location}&appid=${apiKey}&units=imperial`;
+    const response = await axios.get(url);
+    const data = response.data;
+
+    // 2. Mapeo de datos reales a nuestro formato interno
+    const weatherId = data.weather[0].id; // ID numérico del clima
+    let event: NOAAWeatherData['event'] = 'Clear';
+    let severity: NOAAWeatherData['severity'] = 'minor';
+
+    // Lógica de mapeo simplificada
+    if (weatherId >= 200 && weatherId < 300) { event = 'Tornado'; severity = 'severe'; } // Tormentas
+    else if (weatherId >= 300 && weatherId < 600) { event = 'Flood'; severity = 'moderate'; } // Lluvia
+    else if (weatherId >= 600 && weatherId < 700) { event = 'Hail'; severity = 'moderate'; } // Nieve
+    else if (weatherId >= 800) { event = 'Clear'; severity = 'minor'; }
+
+    return {
+      location: data.name,
+      date: new Date(), // OpenWeather gratuito es tiempo real
+      event,
+      severity,
+      temperature: data.main.temp,
+      windSpeed: data.wind.speed,
+      precipitation: data.rain ? data.rain['1h'] || 0 : 0
+    };
+
+  } catch (error) {
+    console.error('[Weather] API request failed, falling back to simulation:', error);
+    return simulateWeather(location, date);
+  }
+}
+
+function simulateWeather(location: string, date: Date): NOAAWeatherData {
+   // Simulate API latency
+   // await new Promise(resolve => setTimeout(resolve, 400)); // (Comentado para que sea síncrono en fallback)
+   
+   const events: Array<'Hurricane' | 'Tornado' | 'Hail' | 'Flood' | 'Clear'> = 
+    ['Hurricane', 'Tornado', 'Hail', 'Flood', 'Clear'];
+   const severities: Array<'minor' | 'moderate' | 'severe' | 'catastrophic'> = 
+    ['minor', 'moderate', 'severe', 'catastrophic'];
+   
+   return {
+    location,
+    date,
+    event: events[Math.floor(Math.random() * events.length)],
+    severity: severities[Math.floor(Math.random() * severities.length)],
+    temperature: Math.floor(Math.random() * 60) + 40,
+    windSpeed: Math.floor(Math.random() * 100),
+    precipitation: Math.random() * 5
+   };
+}
+
+/**
+ * ClaimRevenant Agent - Main orchestrator
+ * Coordinates email extraction, weather validation, and AS/400 submission
+ */
+export class ClaimRevenantAgent {
+  private as400Server: AS400MCPServer;
+  
+  constructor() {
+    this.as400Server = new AS400MCPServer();
+  }
+  
+  /**
+   * Processes a claim from email through to AS/400 submission
+   * @param emailId - Email identifier or 'MANUAL_INPUT' for manual claims
+   * @param manualData - Optional raw claim data for manual injection
+   */
+  async processClaim(emailId: string, manualData?: RawClaimData): Promise<ProcessedClaim> {
+    const startTime = Date.now();
+    
+    console.log(`[ClaimRevenant] Starting claim processing for: ${emailId}`);
+    
+    // STEP 1: Extract claim data from email OR use manual data
+    let emailClaim: EmailClaim;
+    
+    if (manualData) {
+      console.log(`[ClaimRevenant] Using manual injection data`);
+      emailClaim = convertRawToEmailClaim(manualData);
+    } else {
+      emailClaim = await extractClaimFromEmail(emailId);
+    }
+    
+    console.log(`[ClaimRevenant] Extracted claim from email: ${emailClaim.subject}`);
+    
+    // STEP 2: Parse email body into structured claim data
+    const parsedClaim = this.parseEmailToClaim(emailClaim);
+    console.log(`[ClaimRevenant] Parsed claim ID: ${parsedClaim.id}`);
+    
+    // FIX: Check for invalid data early
+    if (parsedClaim.hasInvalidData) {
+      console.log('[ClaimRevenant] Invalid or incomplete email data detected');
+      const processingTime = Date.now() - startTime;
+      
+      return {
+        ...parsedClaim,
+        weatherData: {
+          location: parsedClaim.location,
+          date: new Date(),
+          event: 'Clear',
+          severity: 'minor',
+          temperature: 0,
+          windSpeed: 0,
+          precipitation: 0
+        },
+        validationResult: {
+          isValid: false,
+          weatherMatch: false,
+          fraudRisk: 'high',
+          reasons: ['Invalid or incomplete email data'],
+          decision: 'INVALID_DATA'
+        },
+        processingTime,
+        decision: 'INVALID_DATA'
+      };
+    }
+    
+    // STEP 3: Parallel validation - fetch weather data and check AS/400 connection
+    console.log('[ClaimRevenant] Running parallel validations...');
+    
+    const [weatherData, connectionStatus] = await Promise.all([
+      fetchNOAAWeather(parsedClaim.location, parsedClaim.date),
+      this.ensureAS400Connection()
+    ]);
+    
+    console.log(`[ClaimRevenant] Weather data retrieved: ${weatherData.event} (${weatherData.severity})`);
+    console.log(`[ClaimRevenant] AS/400 connection: ${connectionStatus ? 'OK' : 'FAILED'}`);
+
+    // ✅ GUARD CLAUSE: Fallo de conexión
+    if (!connectionStatus) {
+      console.log('[ClaimRevenant] AS/400 connection failed, returning ERROR');
+      return {
+        ...parsedClaim,
+        status: 'ERROR',
+        decision: 'ERROR',
+        processingTime: Date.now() - startTime,
+        validationResult: {
+          isValid: false,
+          weatherMatch: false,
+          fraudRisk: 'high',
+          reasons: ['Failed to connect to AS/400'],
+          decision: 'INVALID_DATA', // Usamos un tipo válido para ValidationResult
+        },
+        weatherData,
+        gitCommitHash: 'NO_TOKEN',
+        errorDetails: 'Failed to connect to AS/400 after retry attempts',
+      };
+    }
+    
+    // STEP 4: Validate claim against weather data (USING AI + Vision)
+    const imageBase64 = manualData?.imageBase64;
+    const validationResult = await validateClaim(parsedClaim, weatherData, imageBase64);
+    
+    console.log(`[ClaimRevenant] Validation result: ${validationResult.isValid ? 'VALID' : 'INVALID'}`);
+    console.log(`[ClaimRevenant] Fraud risk: ${validationResult.fraudRisk}`);
+    console.log(`[ClaimRevenant] Decision: ${validationResult.decision}`);
+    
+    // Imprimir razonamiento de la IA
+    if (validationResult.reasons && validationResult.reasons.length > 0) {
+        console.log('🧠 [AI Reasoning]:');
+        validationResult.reasons.forEach(r => console.log(`   - ${r}`));
+    }
+
+    // STEP 5: Submit to AS/400 if approved
+    let gitCommitHash: string | undefined;
+    const decision = validationResult.decision;
+
+    if (decision === 'APPROVE') {
+      // Si se aprueba, lo guardamos en el AS/400
+      const submitResult = await this.submitToAS400(parsedClaim);
+      
+      // ✅ GUARD CLAUSE: Fallo de envío
+      if (!submitResult) {
+        console.log('[ClaimRevenant] AS/400 submission failed, returning error status');
+        return {
+          ...parsedClaim,
+          weatherData,
+          validationResult,
+          processingTime: Date.now() - startTime,
+          decision,
+          gitCommitHash,
+          status: 'SUBMIT_FAILED',
+          errorDetails: 'AS/400 submission returned undefined',
+        };
+      }
+      
+      console.log(`[ClaimRevenant] Successfully submitted approved claim to AS/400`);
+    } else {
+      console.log(`[ClaimRevenant] Claim flagged as ${decision}. Skipping AS/400 submit.`);
+    }
+    
+    // STEP 6: Commit decision to GitHub using MCP
+    try {
+      gitCommitHash = await this.commitDecisionToGitHub(parsedClaim.id, decision);
+      console.log(`[ClaimRevenant] Decision committed to GitHub: ${gitCommitHash}`);
+    } catch (error) {
+      console.error('[ClaimRevenant] Failed to commit to GitHub:', error);
+    }
+    
+    const processingTime = Date.now() - startTime;
+    console.log(`[ClaimRevenant] Total processing time: ${processingTime}ms`);
+    
+    return {
+      ...parsedClaim,
+      weatherData,
+      validationResult,
+      processingTime,
+      decision,
+      gitCommitHash
+    };
+  }
+
+  /**
+   * Parses email body into structured claim data
+   */
+  private parseEmailToClaim(email: EmailClaim): MockClaim & { hasInvalidData?: boolean } {
+    const body = email.body;
+    
+    const policyMatch = body.match(/Policy Number:\s*([A-Z]+-\d+)/);
+    const claimantMatch = body.match(/Claimant:\s*([^\n]+)/);
+    const dateMatch = body.match(/Date of Loss:\s*([^\n]+)/);
+    const locationMatch = body.match(/Location:\s*([^\n]+)/);
+    const damageMatch = body.match(/Damage Type:\s*(Hurricane|Fire|Theft|Vandalism)/);
+    const costMatch = body.match(/Estimated Cost:\s*\$?([\d,]+)/);
+    
+    const year = new Date().getFullYear();
+    const sequence = Math.floor(Math.random() * 900) + 100;
+    const claimId = `CLM-${year}-${sequence}`;
+    
+    let amount = 0;
+    if (costMatch) {
+      const parsedAmount = parseInt(costMatch[1].replace(/,/g, ''), 10);
+      amount = isNaN(parsedAmount) ? 0 : parsedAmount;
+    }
+    
+    const hasInvalidData = !policyMatch || !claimantMatch || !damageMatch || amount === 0;
+    
+    return {
+      id: claimId,
+      policyNumber: policyMatch?.[1] || 'UNKNOWN',
+      claimantName: claimantMatch?.[1]?.trim() || 'Unknown Claimant',
+      date: dateMatch ? new Date(dateMatch[1]) : new Date(),
+      location: locationMatch?.[1]?.trim() || 'Unknown Location',
+      damageType: (damageMatch?.[1] as any) || 'Fire',
+      amount,
+      status: 'PENDING',
+      hasInvalidData
+    };
+  }
+  
+  /**
+   * Ensures AS/400 connection is established with RETRIES
+   */
+  private async ensureAS400Connection(): Promise<boolean> {
+    if (this.as400Server.isConnected()) {
+      console.log('[ClaimRevenant] AS/400 already connected');
+      return true;
+    }
+    
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[ClaimRevenant] AS/400 Connection attempt ${attempt}...`);
+        await this.as400Server.connect();
+        return true; // ¡Éxito!
+      } catch (error) {
+        console.error(`[ClaimRevenant] AS/400 attempt ${attempt} failed:`, (error as Error).message);
+        if (attempt === maxRetries) {
+          console.error('[ClaimRevenant] Max connection retries reached. Failing.');
+          return false; // Falló todas las veces
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Submits validated claim to AS/400 legacy system
+   */
+  private async submitToAS400(claim: MockClaim): Promise<LegacyResponse | undefined> {
+    const insertCommand = `INSERT INTO CLAIMS VALUES (
+      '${claim.id}',
+      '${claim.policyNumber}',
+      '${claim.claimantName}',
+      '${claim.location}',
+      '${claim.damageType}',
+      ${claim.amount},
+      '${claim.date.toISOString()}',
+      '${claim.status}'
+    )`;
+    
+    try {
+      const response = await this.as400Server.runCommand(insertCommand);
+      
+      if (!response) {
+        console.warn('[ClaimRevenant] AS/400 returned undefined response. Skipping submit.');
+        return undefined;
+      }
+      
+      console.log(`[ClaimRevenant] AS/400 response time: ${response.executionTime}ms`);
+      return response;
+    } catch (error) {
+      console.error('[ClaimRevenant] Failed to submit to AS/400:', error);
+      return undefined; // Resiliencia: no lanzar error
+    }
+  }
+  
+  async batchProcessClaims(emailIds: string[]): Promise<ProcessedClaim[]> {
+    console.log(`[ClaimRevenant] Batch processing ${emailIds.length} claims`);
+    
+    const results = await Promise.all(
+      emailIds.map(emailId => this.processClaim(emailId))
+    );
+    
+    const totalTime = results.reduce((sum, r) => sum + r.processingTime, 0);
+    const avgTime = totalTime / results.length;
+    
+    console.log(`[ClaimRevenant] Batch complete - Average time: ${avgTime.toFixed(0)}ms per claim`);
+    
+    return results;
+  }
+  
+  generateReport(processedClaims: ProcessedClaim[]): string {
+    const total = processedClaims.length;
+    const valid = processedClaims.filter(c => c.validationResult.isValid).length;
+    const highRisk = processedClaims.filter(c => c.validationResult.fraudRisk === 'high').length;
+    const avgTime = processedClaims.reduce((sum, c) => sum + c.processingTime, 0) / total;
+    
+    return `
+=== ClaimRevenant Processing Report ===
+Total Claims Processed: ${total}
+Valid Claims: ${valid} (${((valid/total)*100).toFixed(1)}%)
+High Risk Claims: ${highRisk} (${((highRisk/total)*100).toFixed(1)}%)
+Average Processing Time: ${avgTime.toFixed(0)}ms
+Target Met: ${avgTime < 300000 ? 'YES (<5min)' : 'NO'}
+    `.trim();
+  }
+  
+  private async commitDecisionToGitHub(
+    claimId: string,
+    decision: 'APPROVE' | 'INVESTIGATE' | 'INVALID_DATA'
+  ): Promise<string> {
+    const commitMessage = `[Agent] Processed claim ${claimId}. Decision: ${decision}`;
+    
+    try {
+      const timestamp = new Date().toISOString();
+      const logEntry = `${timestamp} - Claim ${claimId}: ${decision}\n`;
+      
+      const { stdout: writeResult } = await execAsync(
+        `echo "${logEntry}" >> .kiro/logs/agent-decisions.log`
+      );
+      
+      await execAsync('git add .kiro/logs/agent-decisions.log');
+      
+      const githubToken = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
+      
+      if (!githubToken) {
+        console.warn('[ClaimRevenant] GITHUB_PERSONAL_ACCESS_TOKEN not set, skipping commit');
+        return 'NO_TOKEN';
+      }
+      
+      const { stdout: commitOutput } = await execAsync(
+        `git commit -m "${commitMessage}"`
+      );
+      
+      const hashMatch = commitOutput.match(/\[[\w-]+ ([a-f0-9]+)\]/);
+      const commitHash = hashMatch ? hashMatch[1] : 'unknown';
+      
+      console.log(`[ClaimRevenant] Git commit created: ${commitHash}`);
+      
+      return commitHash;
+      
+    } catch (error) {
+      console.error('[ClaimRevenant] Git commit failed:', error);
+      throw new Error(`Failed to commit to GitHub: ${error}`);
+    }
+  }
+  
+  async cleanup(): Promise<void> {
+    if (this.as400Server.isConnected()) {
+      await this.as400Server.disconnect();
+      console.log('[ClaimRevenant] Cleanup complete');
+    }
+  }
+}

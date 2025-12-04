@@ -1,8 +1,11 @@
 {
   "name": "frankenstack",
   "version": "1.0.0",
-  "description": "",
+  "description": "Legacy-to-AI Connector - Kiroween Hackathon 2025",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "test": "jest",
     "dev": "vite",

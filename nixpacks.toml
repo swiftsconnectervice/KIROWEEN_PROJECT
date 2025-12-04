@@ -1,11 +1,17 @@
 # Nixpacks configuration for Railway
 # Forces Node 20 for Vite 7 compatibility
 
+providers = ["node"]
+
+[variables]
+NODE_VERSION = "20"
+NPM_CONFIG_PRODUCTION = "false"
+
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm ci --include=dev"]
 
 [phases.build]
 cmds = [
@@ -14,4 +20,4 @@ cmds = [
 ]
 
 [start]
-cmd = "npx ts-node server.ts"
+cmd = "npx prisma db push --skip-generate && npx ts-node server.ts"

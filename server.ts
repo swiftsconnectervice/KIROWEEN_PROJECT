@@ -1,16 +1,22 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { PrismaClient } from '@prisma/client'; // <-- El cliente de Base de Datos
 import { ClaimRevenantAgent } from './src/agents/claim-revenant-agent';
 import OpenAI from 'openai';
 
 const app = express();
-const port = 4000;
+const port = process.env.PORT || 4000;
 const prisma = new PrismaClient();
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Aumentado para soportar imágenes Base64
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../dist')));
+}
 
 // 1. Endpoint de Procesamiento
 app.get('/api/process-claims', async (req, res) => {
@@ -169,6 +175,94 @@ app.post('/api/seance', async (req, res) => {
   }
 });
 
+// 4. Endpoint: SYSTEM LOGS (Híbrido: datos reales + contexto) 📜
+app.get('/api/system-logs', async (req, res) => {
+  try {
+    // Obtener datos reales de la base de datos
+    const recentClaims = await prisma.claim.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 5
+    });
+
+    const totalClaims = await prisma.claim.count();
+    const fraudClaims = await prisma.claim.count({
+      where: {
+        OR: [
+          { decision: 'INVESTIGATE' },
+          { fraudRisk: 'high' }
+        ]
+      }
+    });
+
+    // Generar logs basados en datos reales
+    const logs: Array<{ timestamp: string; prefix: string; type: string; message: string }> = [];
+    const now = new Date();
+
+    // Log de estado del sistema
+    logs.push({
+      timestamp: new Date(now.getTime() - 5000).toISOString(),
+      prefix: 'SYSTEM',
+      type: 'success',
+      message: `Database connected. Total claims: ${totalClaims}`
+    });
+
+    // Logs de claims recientes
+    recentClaims.forEach((claim, idx) => {
+      const claimTime = new Date(now.getTime() - (idx + 1) * 15000);
+      logs.push({
+        timestamp: claimTime.toISOString(),
+        prefix: 'CLAIM',
+        type: claim.decision === 'APPROVE' ? 'success' : 
+              claim.decision === 'INVESTIGATE' ? 'warning' : 'info',
+        message: `${claim.id} → ${claim.decision} | ${claim.location} | Risk: ${claim.fraudRisk}`
+      });
+
+      // Agregar log de weather si existe
+      if (claim.weatherEvent) {
+        logs.push({
+          timestamp: new Date(claimTime.getTime() - 2000).toISOString(),
+          prefix: 'NOAA',
+          type: 'info',
+          message: `Weather verified: ${claim.weatherEvent} at ${claim.location}`
+        });
+      }
+    });
+
+    // Log de fraude si hay
+    if (fraudClaims > 0) {
+      logs.push({
+        timestamp: new Date(now.getTime() - 1000).toISOString(),
+        prefix: 'FRAUD',
+        type: 'warning',
+        message: `Alert: ${fraudClaims} claims flagged for investigation`
+      });
+    }
+
+    // Ordenar por timestamp descendente
+    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    res.json({
+      logs: logs.slice(0, 10),
+      stats: {
+        totalClaims,
+        fraudClaims,
+        lastUpdate: now.toISOString()
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch logs' });
+  }
+});
+
+// SPA catch-all: serve index.html for all non-API routes in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
+  });
+}
+
 app.listen(port, () => {
   console.log(`🤖 [Server] Motor + DB encendidos en http://localhost:${port}`);
+  console.log(`📦 [Server] Environment: ${process.env.NODE_ENV || 'development'}`);
 });

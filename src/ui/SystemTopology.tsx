@@ -1,9 +1,18 @@
 /**
  * System Topology - Realistic Data Flow Visualization
  * Single-shot processing with neural network visualization
+ * 
+ * @deprecated This component has been superseded by UnifiedSystemView.
+ * UnifiedSystemView combines the topology visualization from this component
+ * with the agent step timeline from NecropsyView into a single unified interface.
+ * 
+ * Migration: Replace <SystemTopology /> with <UnifiedSystemView lastClaim={claim} />
+ * 
+ * This component will be removed in a future version.
+ * Last updated: 2025-12-01
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import Sketch from 'react-p5';
 
 type SystemState = 'idle' | 'processing' | 'error' | 'success';
@@ -281,6 +290,10 @@ function drawNode(p5: any, node: Node, state: SystemState, shockwaveRadius: numb
   p5.pop();
 }
 
+/**
+ * @deprecated Use UnifiedSystemView instead. This component will be removed in a future version.
+ * @see UnifiedSystemView
+ */
 export const SystemTopology: React.FC<SystemTopologyProps> = ({ state = 'idle' }) => {
   const nodesRef = useRef<Node[]>([]);
   const dataPacketRef = useRef<DataPacket | null>(null);
@@ -291,42 +304,59 @@ export const SystemTopology: React.FC<SystemTopologyProps> = ({ state = 'idle' }
   const autoResetRef = useRef<boolean>(false);
   const isSetupRef = useRef<boolean>(false);
   
-  const setup = (p5: any, canvasParentRef: Element) => {
-    // Prevenir setup múltiple
-    if (isSetupRef.current) return;
+  // ✅ Memoizamos setup para que no se recree en cada render
+  const setup = useCallback((p5: any, canvasParentRef: Element) => {
+    // Limpiar TODOS los canvas existentes en el contenedor
+    const allCanvases = canvasParentRef.querySelectorAll('canvas');
+    allCanvases.forEach(canvas => canvas.remove());
+    
+    // Limpiar también por ID global
+    const globalCanvas = document.querySelector('#system-topology-canvas');
+    if (globalCanvas) {
+      globalCanvas.remove();
+    }
+    
+    const canvas = p5.createCanvas(1200, 500).parent(canvasParentRef);
+    canvas.id('system-topology-canvas');
+    
+    // Definir nodos solo si no existen
+    if (nodesRef.current.length === 0) {
+      nodesRef.current = [
+        { x: 200, y: 250, label: 'Frontend', color: [6, 182, 212] },
+        { x: 450, y: 250, label: 'Gateway', color: [168, 85, 247] },
+        { x: 750, y: 250, label: 'AI Brain', color: [34, 197, 94], isAI: true },
+        { x: 1000, y: 250, label: 'Legacy', color: [249, 115, 22] }
+      ];
+    }
+    
+    // Inicializar neuronas para AI Brain solo si no existen
+    if (neuronsRef.current.length === 0) {
+      const aiNode = nodesRef.current[2];
+      for (let i = 0; i < 6; i++) {
+        neuronsRef.current.push({
+          x: aiNode.x + p5.random(-40, 40),
+          y: aiNode.y + p5.random(-30, 30),
+          vx: p5.random(-0.3, 0.3),
+          vy: p5.random(-0.3, 0.3)
+        });
+      }
+    }
+    
     isSetupRef.current = true;
-    
-    // Limpiar canvas existentes
-    const existingCanvas = canvasParentRef.querySelector('canvas');
-    if (existingCanvas) {
-      existingCanvas.remove();
-    }
-    
-    p5.createCanvas(1200, 500).parent(canvasParentRef);
-    
-    // Definir nodos
-    nodesRef.current = [
-      { x: 200, y: 250, label: 'Frontend', color: [6, 182, 212] },
-      { x: 450, y: 250, label: 'Gateway', color: [168, 85, 247] },
-      { x: 750, y: 250, label: 'AI Brain', color: [34, 197, 94], isAI: true },
-      { x: 1000, y: 250, label: 'Legacy', color: [249, 115, 22] }
-    ];
-    
-    // Inicializar neuronas para AI Brain
-    const aiNode = nodesRef.current[2];
-    for (let i = 0; i < 6; i++) {
-      neuronsRef.current.push({
-        x: aiNode.x + p5.random(-40, 40),
-        y: aiNode.y + p5.random(-30, 30),
-        vx: p5.random(-0.3, 0.3),
-        vy: p5.random(-0.3, 0.3)
-      });
-    }
-  };
+  }, []); // No dependencias, solo se ejecuta una vez
   
-  const draw = (p5: any) => {
-    // Fondo negro puro
-    p5.background(10, 10, 10);
+  // ✅ Memoizamos draw con sus dependencias
+  const draw = useCallback((p5: any) => {
+    // Fondo con gradiente que coincide con el dashboard
+    // Crear gradiente de izquierda a derecha: gray-900 → purple-900 → gray-950
+    const ctx = p5.drawingContext;
+    const gradient = ctx.createLinearGradient(0, 0, p5.width, p5.height);
+    gradient.addColorStop(0, 'rgb(17, 24, 39)');      // gray-900
+    gradient.addColorStop(0.5, 'rgb(88, 28, 135)');   // purple-900
+    gradient.addColorStop(1, 'rgb(3, 7, 18)');        // gray-950
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, p5.width, p5.height);
     
     // Detectar cambio de estado
     if (state === 'processing' && prevStateRef.current !== 'processing') {
@@ -412,12 +442,32 @@ export const SystemTopology: React.FC<SystemTopologyProps> = ({ state = 'idle' }
     p5.text(`> STATUS: ${state.toUpperCase()}`, 30, 62);
     
     p5.pop();
-  };
+  }, [state]); // ✅ Dependencia: solo se recrea si 'state' cambia
   
   // Cleanup al desmontar
   useEffect(() => {
     return () => {
       isSetupRef.current = false;
+      
+      // Limpiar todos los canvas relacionados
+      const canvas = document.querySelector('#system-topology-canvas');
+      if (canvas) {
+        canvas.remove();
+      }
+      
+      // Limpiar todos los canvas huérfanos
+      const allCanvases = document.querySelectorAll('canvas');
+      allCanvases.forEach(c => {
+        if (c.id === 'system-topology-canvas' || c.parentElement?.querySelector('canvas') === c) {
+          c.remove();
+        }
+      });
+      
+      // Resetear refs
+      nodesRef.current = [];
+      neuronsRef.current = [];
+      dataPacketRef.current = null;
+      shockwaveRef.current = null;
     };
   }, []);
 

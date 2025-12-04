@@ -15,7 +15,11 @@ interface ProcessingResult {
   error?: string;
 }
 
-export const InjectorView: React.FC = () => {
+interface InjectorViewProps {
+  onClose?: () => void;
+}
+
+export const InjectorView: React.FC<InjectorViewProps> = ({ onClose }) => {
   const [subject, setSubject] = useState('');
   const [location, setLocation] = useState('');
   const [emailBody, setEmailBody] = useState('');
@@ -103,23 +107,42 @@ export const InjectorView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="bg-gray-800 rounded-lg p-6 border-2 border-purple-500/30 shadow-lg shadow-purple-500/20 mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <Syringe className="w-8 h-8 text-purple-400" />
-          <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-green-400">
-            Manual Claim Injector
-          </h2>
-        </div>
-        <p className="text-gray-400 text-sm">
-          Inject custom insurance claims directly into the processing pipeline for testing
-        </p>
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      {/* Glow Effect */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="w-full max-w-2xl h-[85vh] bg-cyan-500/20 rounded-xl blur-3xl animate-pulse" />
       </div>
+      
+      <div className="relative bg-gray-900 w-full max-w-2xl rounded-xl border-2 border-cyan-500/50 
+                      shadow-[0_0_50px_rgba(6,182,212,0.3)] animate-in fade-in zoom-in-95 duration-200 
+                      max-h-[85vh] overflow-hidden flex flex-col">
+        
+        {/* Header con Botón Cerrar */}
+        <div className="p-6 border-b border-cyan-500/30 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Syringe className="w-6 h-6 text-cyan-400" />
+            <div>
+              <h2 className="text-2xl font-bold text-cyan-400">
+                Claim Injector
+              </h2>
+              <p className="text-gray-400 text-xs mt-1">
+                Inject custom claims into the processing pipeline
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 bg-gray-800 hover:bg-red-600 rounded-full 
+                     transition-colors border border-cyan-400/50"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        {/* Contenido con Scroll */}
+        <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
 
-      {/* Form */}
-      <div className="bg-gray-800 rounded-lg p-8 border border-purple-500/30 shadow-lg">
-        <div className="space-y-6">
+          <div className="space-y-4">
           {/* Subject Field */}
           <div>
             <label className="block text-sm font-semibold text-purple-400 mb-2">
@@ -304,6 +327,7 @@ Description: Roof damage from hurricane winds`}
             <p className="text-xs text-gray-400 text-center">
               💉 Claims are processed through the full pipeline: Parser → Weather API → AI Validator → SQLite
             </p>
+          </div>
           </div>
         </div>
       </div>

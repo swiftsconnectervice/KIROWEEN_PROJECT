@@ -1,13 +1,13 @@
+// LOCAL DEVELOPMENT SCHEMA (SQLite)
+// To use: copy this file to schema.prisma for local dev
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  // SQLite for local development, PostgreSQL for production
-  // Local: DATABASE_URL="file:./dev.db"
-  // Production: DATABASE_URL="postgresql://user:pass@host:5432/db"
-  provider = "postgresql"
-  url      = env("DATABASE_URL") 
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model Claim {

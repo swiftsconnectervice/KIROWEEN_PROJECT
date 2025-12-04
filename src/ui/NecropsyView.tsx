@@ -2,6 +2,17 @@
  * NecropsyView Component
  * Visual timeline showing agent execution steps as "organs"
  * POWERED BY REAL DATA
+ * 
+ * @deprecated This component has been superseded by UnifiedSystemView.
+ * UnifiedSystemView combines the agent step timeline from this component
+ * with the system topology visualization into a single unified interface.
+ * The new component displays step indicators directly on the topology nodes,
+ * providing better spatial context for where each operation occurs.
+ * 
+ * Migration: Replace <NecropsyView lastClaim={claim} /> with <UnifiedSystemView lastClaim={claim} />
+ * 
+ * This component will be removed in a future version.
+ * Last updated: 2025-12-01
  */
 
 import React, { useState, useEffect } from 'react';
@@ -56,6 +67,10 @@ const STATUS_COLORS = {
 };
 
 // --- COMPONENTE PRINCIPAL ---
+/**
+ * @deprecated Use UnifiedSystemView instead. This component will be removed in a future version.
+ * @see UnifiedSystemView
+ */
 export const NecropsyView: React.FC<{ lastClaim?: ProcessedClaim }> = ({ lastClaim }) => {
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);

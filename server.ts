@@ -15,7 +15,9 @@ app.use(express.json({ limit: '50mb' })); // Aumentado para soportar imágenes B
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../dist')));
+  const distPath = path.join(process.cwd(), 'dist');
+  console.log(`📂 [Server] Serving static files from: ${distPath}`);
+  app.use(express.static(distPath));
 }
 
 // 1. Endpoint de Procesamiento
@@ -260,7 +262,8 @@ if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
     // Only serve index.html for non-API routes
     if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(__dirname, '../dist/index.html'));
+      const indexPath = path.join(process.cwd(), 'dist', 'index.html');
+      res.sendFile(indexPath);
     } else {
       next();
     }

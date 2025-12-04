@@ -257,8 +257,13 @@ app.get('/api/system-logs', async (req, res) => {
 
 // SPA catch-all: serve index.html for all non-API routes in production
 if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dist/index.html'));
+  app.use((req, res, next) => {
+    // Only serve index.html for non-API routes
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(__dirname, '../dist/index.html'));
+    } else {
+      next();
+    }
   });
 }
 

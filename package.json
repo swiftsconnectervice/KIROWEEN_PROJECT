@@ -4,7 +4,7 @@
   "description": "Legacy-to-AI Connector - Kiroween Hackathon 2025",
   "main": "index.js",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "test": "jest",
@@ -50,7 +50,7 @@
     "@types/express": "^5.0.5",
     "@types/react": "^19.2.4",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.22",
     "concurrently": "^9.2.1",
     "fast-check": "^4.3.0",
@@ -61,6 +61,6 @@
     "tailwindcss": "^3.4.18",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vite": "^7.2.2"
+    "vite": "^5.4.0"
   }
 }

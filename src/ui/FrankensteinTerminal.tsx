@@ -365,7 +365,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
           
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
             
             const response = await fetch('/api/seance', {
               method: 'POST',

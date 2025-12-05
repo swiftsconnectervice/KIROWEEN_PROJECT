@@ -276,7 +276,8 @@ EXAMPLES:
         { role: "system", content: systemPrompt },
         { role: "user", content: question }
       ],
-      temperature: 0.3 // Lower temperature for more factual responses
+      temperature: 0.3,
+      max_tokens: 250
     });
 
     res.json({ answer: completion.choices[0].message.content });

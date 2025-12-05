@@ -1,1 +1,1 @@
-web: npm run db:push && npm run start
+web: npx prisma db push && node dist-server/server.js

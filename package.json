@@ -13,7 +13,7 @@
     "dev:full": "concurrently \"npm run server\" \"npm run dev\"",
     "prebuild": "echo 'Vite version:' && npx vite --version",
     "build": "npx vite@5.4.0 build",
-    "start": "node dist-server/server.js",
+    "start": "prisma db push && node dist-server/server.js",
     "build:server": "tsc server.ts --outDir dist-server --esModuleInterop --resolveJsonModule",
     "postinstall": "prisma generate",
     "db:push": "prisma db push"

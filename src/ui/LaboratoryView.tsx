@@ -674,7 +674,7 @@ export const LaboratoryView: React.FC<LaboratoryViewProps> = ({
                 <p className="text-2xl font-bold text-green-400 font-mono tracking-widest 
                             group-hover:text-green-300 transition-colors duration-300"
                    style={{ textShadow: '0 0 20px rgba(34, 197, 94, 0.8)' }}>
-                  RESUCITAR SISTEMA
+                  RESURRECT SYSTEM
                 </p>
                 <p className="text-xs text-gray-500 font-mono mt-1 group-hover:text-gray-400">
                   REANIMAR AS/400

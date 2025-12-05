@@ -62,7 +62,7 @@ export async function extractClaimFromEmail(emailId: string): Promise<EmailClaim
       Policy Number: AUTO-1234567
       Claimant: John Smith
       Date of Loss: ${new Date().toISOString()}
-      Location: ${location}  <-- ¡AQUÍ SE INYECTA LA CIUDAD REAL!
+      Location: ${location}
       Damage Type: ${damage}
       Estimated Cost: $25,000
     `,

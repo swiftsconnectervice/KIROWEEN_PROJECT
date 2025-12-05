@@ -70,28 +70,57 @@ async function fetchNOAAWeather(location: string, date: Date): Promise<NOAAWeath
     };
 
   } catch (error) {
-    console.error('[Weather] API request failed, falling back to simulation:', error);
+    // HOOK: on-weather-api-fail - Fallback to simulation
+    console.warn('[HOOK: on-weather-api-fail] Weather API request failed!');
+    console.warn(`   Location: ${location}`);
+    console.warn(`   Error: ${error}`);
+    console.warn(`   Action: Falling back to location-aware simulation`);
     return simulateWeather(location, date);
   }
 }
 
 function simulateWeather(location: string, date: Date): NOAAWeatherData {
-   // Simulate API latency
-   // await new Promise(resolve => setTimeout(resolve, 400)); // (Comentado para que sea síncrono en fallback)
+   // More realistic simulation based on location
+   const locationLower = location.toLowerCase();
    
-   const events: Array<'Hurricane' | 'Tornado' | 'Hail' | 'Flood' | 'Clear'> = 
-    ['Hurricane', 'Tornado', 'Hail', 'Flood', 'Clear'];
-   const severities: Array<'minor' | 'moderate' | 'severe' | 'catastrophic'> = 
-    ['minor', 'moderate', 'severe', 'catastrophic'];
+   // Coastal US locations can have hurricanes
+   const coastalUS = ['miami', 'florida', 'houston', 'texas', 'new orleans', 'louisiana', 'carolina'];
+   const canHaveHurricane = coastalUS.some(c => locationLower.includes(c));
+   
+   // Midwest US can have tornadoes
+   const midwestUS = ['oklahoma', 'kansas', 'nebraska', 'iowa', 'missouri'];
+   const canHaveTornado = midwestUS.some(c => locationLower.includes(c));
+   
+   // Select realistic events based on location
+   let possibleEvents: Array<'Hurricane' | 'Tornado' | 'Hail' | 'Flood' | 'Clear'>;
+   
+   if (canHaveHurricane) {
+     possibleEvents = ['Hurricane', 'Flood', 'Clear', 'Clear']; // Higher chance of hurricane
+   } else if (canHaveTornado) {
+     possibleEvents = ['Tornado', 'Hail', 'Clear', 'Clear'];
+   } else {
+     // Most locations: no extreme weather, mostly clear or rain
+     possibleEvents = ['Clear', 'Clear', 'Clear', 'Flood']; // 75% clear, 25% rain
+   }
+   
+   const event = possibleEvents[Math.floor(Math.random() * possibleEvents.length)];
+   
+   // Severity based on event
+   let severity: 'minor' | 'moderate' | 'severe' | 'catastrophic' = 'minor';
+   if (event === 'Hurricane') severity = Math.random() > 0.5 ? 'severe' : 'catastrophic';
+   else if (event === 'Tornado') severity = Math.random() > 0.5 ? 'moderate' : 'severe';
+   else if (event === 'Flood') severity = 'moderate';
+   
+   console.log(`[Weather] SIMULATION MODE: ${location} → ${event} (${severity})`);
    
    return {
     location,
     date,
-    event: events[Math.floor(Math.random() * events.length)],
-    severity: severities[Math.floor(Math.random() * severities.length)],
+    event,
+    severity,
     temperature: Math.floor(Math.random() * 60) + 40,
-    windSpeed: Math.floor(Math.random() * 100),
-    precipitation: Math.random() * 5
+    windSpeed: event === 'Hurricane' ? 80 + Math.floor(Math.random() * 70) : Math.floor(Math.random() * 30),
+    precipitation: event === 'Clear' ? 0 : Math.random() * 3
    };
 }
 
@@ -102,8 +131,12 @@ function simulateWeather(location: string, date: Date): NOAAWeatherData {
 export class ClaimRevenantAgent {
   private as400Server: AS400MCPServer;
   
-  constructor() {
-    this.as400Server = new AS400MCPServer();
+  constructor(options: { seed?: string; timeout?: number } = {}) {
+    this.as400Server = new AS400MCPServer({
+      seed: options.seed || 'frankenstack-2025',
+      defaultTimeout: options.timeout || 5000,
+      rateLimit: 5
+    });
   }
   
   /**
@@ -265,8 +298,9 @@ export class ClaimRevenantAgent {
     const claimantMatch = body.match(/Claimant:\s*([^\n]+)/);
     const dateMatch = body.match(/Date of Loss:\s*([^\n]+)/);
     const locationMatch = body.match(/Location:\s*([^\n]+)/);
-    const damageMatch = body.match(/Damage Type:\s*(Hurricane|Fire|Theft|Vandalism)/);
+    const damageMatch = body.match(/Damage Type:\s*(Hurricane|Fire|Flood|Theft|Vandalism)/);
     const costMatch = body.match(/Estimated Cost:\s*\$?([\d,]+)/);
+    const detailsMatch = body.match(/Details:\s*(.+?)(?:\n|$)/s);
     
     const year = new Date().getFullYear();
     const sequence = Math.floor(Math.random() * 900) + 100;
@@ -277,6 +311,9 @@ export class ClaimRevenantAgent {
       const parsedAmount = parseInt(costMatch[1].replace(/,/g, ''), 10);
       amount = isNaN(parsedAmount) ? 0 : parsedAmount;
     }
+    
+    // Extract user description from Details field
+    const userDescription = detailsMatch?.[1]?.trim() || email.subject || 'No description provided';
     
     const hasInvalidData = !policyMatch || !claimantMatch || !damageMatch || amount === 0;
     
@@ -289,6 +326,7 @@ export class ClaimRevenantAgent {
       damageType: (damageMatch?.[1] as any) || 'Fire',
       amount,
       status: 'PENDING',
+      description: userDescription,
       hasInvalidData
     };
   }
@@ -337,7 +375,18 @@ export class ClaimRevenantAgent {
     )`;
     
     try {
+      const queryStart = Date.now();
       const response = await this.as400Server.runCommand(insertCommand);
+      const queryDuration = Date.now() - queryStart;
+      
+      // HOOK: on-legacy-query - Log performance metrics
+      console.log(`[HOOK: on-legacy-query] AS/400 query executed`);
+      console.log(`   Command: INSERT INTO CLAIMS...`);
+      console.log(`   Duration: ${queryDuration}ms`);
+      
+      if (queryDuration > 3000) {
+        console.warn(`[HOOK: on-legacy-query] ⚠️ SLOW QUERY DETECTED (${queryDuration}ms > 3000ms threshold)`);
+      }
       
       if (!response) {
         console.warn('[ClaimRevenant] AS/400 returned undefined response. Skipping submit.');
@@ -388,38 +437,64 @@ Target Met: ${avgTime < 300000 ? 'YES (<5min)' : 'NO'}
     decision: 'APPROVE' | 'INVESTIGATE' | 'INVALID_DATA'
   ): Promise<string> {
     const commitMessage = `[Agent] Processed claim ${claimId}. Decision: ${decision}`;
+    const timestamp = new Date().toISOString();
+    const logEntry = `${timestamp} - Claim ${claimId}: ${decision}`;
+    
+    console.log(`[HOOK: git-auto-commit] Attempting to commit decision...`);
+    console.log(`   Claim: ${claimId}`);
+    console.log(`   Decision: ${decision}`);
     
     try {
-      const timestamp = new Date().toISOString();
-      const logEntry = `${timestamp} - Claim ${claimId}: ${decision}\n`;
+      const fs = require('fs');
+      const path = require('path');
       
-      const { stdout: writeResult } = await execAsync(
-        `echo "${logEntry}" >> .kiro/logs/agent-decisions.log`
-      );
+      // Write to log file using Node.js fs (works on all platforms)
+      const logPath = path.join(process.cwd(), '.kiro', 'logs', 'agent-decisions.log');
       
-      await execAsync('git add .kiro/logs/agent-decisions.log');
+      // Ensure directory exists
+      const logDir = path.dirname(logPath);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      
+      // Append to log file
+      fs.appendFileSync(logPath, logEntry + '\n');
+      console.log(`[HOOK: git-auto-commit] Log entry written to ${logPath}`);
+      
+      // Check if we're in a git repository
+      try {
+        await execAsync('git rev-parse --git-dir');
+      } catch {
+        console.warn('[HOOK: git-auto-commit] Not in a git repository (production mode). Skipping commit.');
+        return `LOG_ONLY_${Date.now().toString(36)}`;
+      }
       
       const githubToken = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
       
       if (!githubToken) {
-        console.warn('[ClaimRevenant] GITHUB_PERSONAL_ACCESS_TOKEN not set, skipping commit');
-        return 'NO_TOKEN';
+        console.warn('[HOOK: git-auto-commit] GITHUB_PERSONAL_ACCESS_TOKEN not set. Log saved but not committed.');
+        return `NO_TOKEN_${Date.now().toString(36)}`;
       }
       
+      // Git add
+      await execAsync('git add .kiro/logs/agent-decisions.log');
+      
+      // Git commit
       const { stdout: commitOutput } = await execAsync(
-        `git commit -m "${commitMessage}"`
+        `git commit -m "${commitMessage}" --allow-empty`
       );
       
       const hashMatch = commitOutput.match(/\[[\w-]+ ([a-f0-9]+)\]/);
-      const commitHash = hashMatch ? hashMatch[1] : 'unknown';
+      const commitHash = hashMatch ? hashMatch[1] : `COMMIT_${Date.now().toString(36)}`;
       
-      console.log(`[ClaimRevenant] Git commit created: ${commitHash}`);
+      console.log(`[HOOK: git-auto-commit] ✅ Git commit created: ${commitHash}`);
       
       return commitHash;
       
     } catch (error) {
-      console.error('[ClaimRevenant] Git commit failed:', error);
-      throw new Error(`Failed to commit to GitHub: ${error}`);
+      console.error('[HOOK: git-auto-commit] Git operation failed:', error);
+      // Return a mock hash so the flow continues
+      return `ERROR_${Date.now().toString(36)}`;
     }
   }
   

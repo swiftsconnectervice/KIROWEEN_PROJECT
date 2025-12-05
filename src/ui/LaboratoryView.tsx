@@ -803,40 +803,7 @@ export const LaboratoryView: React.FC<LaboratoryViewProps> = ({
         </div>
       )}
 
-      {/* Panel inferior con último claim */}
-      {lastClaim && !isZoomed && (
-        <div className="absolute bottom-6 left-6 right-6 bg-gray-900/90 backdrop-blur border-2 border-green-500/50 rounded-lg p-4 z-20">
-          <h3 className="text-green-400 font-bold mb-2 flex items-center gap-2 text-sm">
-            📋 ÚLTIMO EXPERIMENTO COMPLETADO
-          </h3>
-          <div className="grid grid-cols-4 gap-4 text-xs">
-            <div>
-              <span className="text-gray-400">Claim ID:</span>
-              <p className="text-white font-mono">{lastClaim.id}</p>
-            </div>
-            <div>
-              <span className="text-gray-400">Decision:</span>
-              <p className={`font-bold ${
-                lastClaim.decision === 'APPROVE' ? 'text-green-400' :
-                lastClaim.decision === 'INVESTIGATE' ? 'text-yellow-400' :
-                'text-red-400'
-              }`}>{lastClaim.decision}</p>
-            </div>
-            <div>
-              <span className="text-gray-400">Fraud Risk:</span>
-              <p className={`font-bold ${
-                lastClaim.validationResult.fraudRisk === 'low' ? 'text-green-400' :
-                lastClaim.validationResult.fraudRisk === 'medium' ? 'text-yellow-400' :
-                'text-red-400'
-              }`}>{lastClaim.validationResult.fraudRisk.toUpperCase()}</p>
-            </div>
-            <div>
-              <span className="text-gray-400">Processing Time:</span>
-              <p className="text-purple-400 font-mono">{lastClaim.processingTime}ms</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Panel inferior removido - los resultados se muestran en la terminal */}
 
       {/* Efectos de partículas flotantes */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">

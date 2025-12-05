@@ -42,43 +42,50 @@ export async function validateClaim(
   try {
     // Construimos el "Prompt" (La instrucción para la IA)
     const textPrompt = `
-      Actúa como un Perito de Seguros Senior experto en detección de fraude.
-      Analiza el siguiente reclamo de seguro comparándolo con los datos oficiales del clima${imageBase64 ? ' Y LA IMAGEN ADJUNTA' : ''}.
+      Act as a Senior Insurance Claims Adjuster expert in fraud detection.
+      Analyze the following insurance claim by comparing it with official weather data${imageBase64 ? ' AND THE ATTACHED IMAGE' : ''}.
 
-      DATOS DEL RECLAMO:
-      - Tipo: ${claim.damageType}
-      - Monto: $${claim.amount}
-      - Ubicación: ${claim.location}
-      - Fecha: ${claim.date.toISOString()}
-      - Descripción del daño: ${claim.damageType}
+      CLAIM DATA:
+      - Damage Type: ${claim.damageType}
+      - Claimed Amount: $${claim.amount}
+      - Location: ${claim.location}
+      - Date: ${claim.date.toISOString()}
+      - User Description: ${claim.description || 'No description provided'}
 
-      DATOS DEL CLIMA OFICIAL (NOAA):
-      - Evento: ${weather.event}
-      - Severidad: ${weather.severity}
-      - Precipitación: ${weather.precipitation} in
-      - Viento: ${weather.windSpeed} mph
+      OFFICIAL WEATHER DATA (NOAA):
+      - Event: ${weather.event}
+      - Severity: ${weather.severity}
+      - Precipitation: ${weather.precipitation} in
+      - Wind Speed: ${weather.windSpeed} mph
 
       ${imageBase64 ? `
-      ANÁLISIS VISUAL REQUERIDO:
-      - Analiza la imagen adjunta del daño reportado.
-      - ¿El daño visual coincide con la descripción del texto?
-      - Si el usuario dice "Pérdida Total" o "Explosión" pero solo hay un rasguño, márcalo como FRAUDE ALTO.
-      - Si el daño visual es consistente con el monto reclamado, es RIESGO BAJO.
-      - Si hay discrepancias entre la imagen y la descripción, es FRAUDE ALTO.
+      VISUAL ANALYSIS REQUIRED:
+      - Analyze the attached image of the reported damage.
+      - Does the visual damage match the text description?
+      - If user claims "Total Loss" or "Explosion" but image shows only a scratch, mark as HIGH FRAUD.
+      - If visual damage is consistent with claimed amount, mark as LOW RISK.
+      - If there are discrepancies between image and description, mark as HIGH FRAUD.
       ` : ''}
 
-      REGLAS:
-      1. Si el tipo de daño no coincide con el evento climático (ej. "Hurricane" damage pero clima "Clear"), es FRAUDE ALTO.
-      2. Si el monto es excesivo para el tipo de daño, es RIESGO MEDIO/ALTO.
-      ${imageBase64 ? '3. Si la imagen muestra daños mínimos pero el texto describe daños severos, es FRAUDE ALTO.' : ''}
-      ${imageBase64 ? '4. Si la imagen no muestra ningún daño visible, es FRAUDE ALTO.' : ''}
+      RULES:
+      1. If reported damage type does NOT match the REAL weather event from NOAA, it's suspicious.
+         - Example: User reports "Fire" but NOAA shows "Flood" → Real weather was rain, not fire conditions.
+         - Example: User reports "Hurricane" but NOAA shows "Clear" → No hurricane that day.
+      2. If amount is excessive for the damage type, mark as MEDIUM/HIGH RISK.
+      ${imageBase64 ? '3. If image shows minimal damage but text describes severe damage, mark as HIGH FRAUD.' : ''}
+      ${imageBase64 ? '4. If image shows no visible damage, mark as HIGH FRAUD.' : ''}
 
-      SALIDA ESPERADA (JSON puro):
+      REASON FORMAT (be specific and clear):
+      - Instead of: "Fire doesn't match Flood"
+      - Write: "Reported damage type 'Fire' but real weather from NOAA shows 'Flood' (rain conditions) - no fire weather detected"
+      - Always explain WHAT is the reported data vs WHAT is the real NOAA data.
+
+      EXPECTED OUTPUT (pure JSON):
       {
         "isValid": boolean,
         "fraudRisk": "low" | "medium" | "high",
         "decision": "APPROVE" | "INVESTIGATE",
-        "reasons": ["lista de razones cortas y técnicas${imageBase64 ? ', INCLUYE análisis visual de la imagen' : ''}"]
+        "reasons": ["clear reasons explaining: reported data vs real NOAA data${imageBase64 ? ', INCLUDE visual analysis of the image' : ''}"]
       }
     `;
 

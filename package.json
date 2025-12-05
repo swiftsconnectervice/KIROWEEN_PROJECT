@@ -41,8 +41,10 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-p5": "^1.4.1",
+    "seedrandom": "^3.0.5",
     "three": "^0.181.2",
-    "ts-jest": "^29.4.5"
+    "ts-jest": "^29.4.5",
+    "winston": "^3.18.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -51,6 +53,7 @@
     "@types/express": "^5.0.5",
     "@types/react": "^19.2.4",
     "@types/react-dom": "^19.2.3",
+    "@types/seedrandom": "^3.0.8",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.22",
     "concurrently": "^9.2.1",

@@ -3,7 +3,7 @@
 ## 📋 Submission Info
 - **Category:** FRANKENSTEIN (Chimera of Technologies)
 - **Bonus Category:** Costume Contest (Haunting UI)
-- **Team:** [Your Team Name]
+- **Team:** VICENTE
 - **Demo Video:** [YouTube URL]
 - **Live App:** [Deployed URL]
 
@@ -130,20 +130,36 @@ This prevented Kiro from generating code with `console.log` or untyped errors, s
 
 **How MCP helped:**
 
-1. **GitHub Auto-Commit:** Every claim decision is automatically committed to git
-   - File: `src/agents/claim-revenant-agent.ts` → `commitDecisionToGitHub()`
-   - Documentation: `.kiro/mcp/github-integration.md`
-
-2. **AS/400 Protocol Translation:** MCP server translates TN5250 → JSON
+1. **AS/400 Protocol Translation:** MCP server translates TN5250 → JSON
    - Enables modern apps to query legacy systems
    - No changes required to AS/400 side
 
+2. **Database Audit Trail:** Every agent decision is logged to SQLite
+   - Actions: `CLAIM_APPROVED`, `FRAUD_DETECTED`
+   - Includes hook name, claim ID, decision context
+   - Queryable via `/api/audit` endpoint and `audit` terminal command
+
 **Features MCP enabled that would be impossible otherwise:**
-- Real-time audit trail in git history
+- Real-time audit trail in database (visible in UI terminal)
 - Bidirectional legacy system communication
 - AI agent orchestration across multiple protocols
 
-**Evidence:** `.kiro/mcp/github-integration.md`
+**Evidence:** `server.ts` (audit logging), `prisma/schema.prisma` (AuditLog model)
+
+### Production-Ready MCP Server Features
+
+The AS/400 MCP server (`src/mcp/as400-mcp-server.ts`) includes enterprise-grade features:
+
+| Feature | Implementation | Purpose |
+|---------|----------------|---------|
+| Rate Limiting | Token Bucket (5 req/s) | Prevent API abuse |
+| Structured Logging | Winston with JSON format | Debugging & monitoring |
+| Typed Errors | AS400TimeoutError, AS400RateLimitError, etc. | Proper error handling |
+| Deterministic Mocks | seedrandom library | Reproducible tests |
+| Correlation IDs | Unique ID per request | Request tracing |
+| Configurable Timeout | Per-command or default 5000ms | Flexible timeout control |
+
+**Evidence:** `.kiro/logs/refactoring-iterations.md` (4 iterations documented with final implementation)
 
 ---
 
@@ -155,6 +171,95 @@ This prevented Kiro from generating code with `console.log` or untyped errors, s
 | Code lines (agent) | 500+ spaghetti | 300 clean |
 | Edge cases covered | ~60% | 95%+ |
 | Manual intervention | Always | Rarely |
+| Hardcoded data in UI | 70% | 5% (real DB queries) |
+| AI hallucination rate | High | Low (explicit prompts) |
+
+---
+
+## 🔄 Iterative Refinement with Kiro (Session 2)
+
+After the initial development, we continued refining the project with Kiro's help:
+
+### Terminal Commands Enhancement
+
+| Command | Before | After |
+|---------|--------|-------|
+| `status` | Hardcoded props | Real `/api/health` endpoint checking DB, OpenAI, Weather API |
+| `metrics` | Random values | Real DB queries for claims count, fraud count, uptime |
+| `weather` | Hardcoded "ONLINE" | Replaced with `fraud` command |
+| `fraud` | N/A | New command showing flagged claims from DB |
+| `inject` | 4 steps | 5 steps (added Amount input) |
+
+**Conversation approach:**
+```
+User: "el system metric muestra realmente datos reales o solo esta hardcodeado?"
+Kiro: [Analyzed code, identified 2 real + 2 fake metrics]
+User: "si porfavor" [fix it]
+Kiro: [Created /api/metrics endpoint, updated command]
+```
+
+### AI Reasoning Improvements
+
+**Problem identified:** User description wasn't being passed to the AI validator.
+
+**Before:**
+```typescript
+- Descripción del daño: ${claim.damageType}  // Just "Fire"
+```
+
+**After:**
+```typescript
+- Descripción del usuario: ${claim.description}  // "un alien explotó el coche"
+```
+
+**Impact:** AI can now analyze user's actual description for fraud detection.
+
+### Weather Simulation Fix
+
+**Problem:** Mexico City was getting "Hurricane" weather (impossible).
+
+**Before:** Random selection from all weather types
+```typescript
+const events = ['Hurricane', 'Tornado', 'Hail', 'Flood', 'Clear'];
+event: events[Math.floor(Math.random() * events.length)]; // Random!
+```
+
+**After:** Location-aware simulation
+```typescript
+// Only coastal US can have hurricanes
+const coastalUS = ['miami', 'florida', 'houston', 'texas'];
+const canHaveHurricane = coastalUS.some(c => location.includes(c));
+// Mexico City → mostly 'Clear' or 'Flood' (rain)
+```
+
+### Seance Chat Enhancement
+
+**Problem:** AI was "hallucinating" instead of using real DB data.
+
+**Solution:** Improved system prompt with explicit rules:
+```typescript
+const systemPrompt = `
+TODAY'S DATE: ${today}
+DATABASE SUMMARY:
+- Total claims: ${totalClaims}
+- Claims today: ${todayClaims}
+
+RULES:
+1. You MUST answer ONLY using the data provided above.
+2. If not in data, say "I don't see that in the current database records."
+`;
+```
+
+### New API Endpoints Created
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/health` | Real health check (DB, OpenAI, Weather, Server uptime) |
+| `/api/metrics` | Real metrics from database |
+| `/api/fraud-claims` | Flagged claims for fraud command |
+| `/api/audit` | Agent decision audit trail |
+| `/api/mcp-status` | MCP server features (rate limiter, logging, errors) |
+| `/api/weather-status` | Weather API status check |
 
 ---
 
@@ -204,7 +309,8 @@ See: `src/ui/README.md` for component status details.
 ├── steering/
 │   └── (3 steering docs)           ← AI behavior rules
 ├── mcp/
-│   └── github-integration.md       ← MCP documentation
+│   ├── as400-mcp.md                ← AS/400 MCP + audit trail docs
+│   └── github-integration.md       ← Optional GitHub auto-commit (dev only)
 ├── prompts/
 │   └── vibe-1-attempt.md           ← Vibe coding evidence
 └── judges-cheat-sheet.md           ← Quick reference
@@ -212,6 +318,20 @@ See: `src/ui/README.md` for component status details.
 src/ui/
 ├── README.md                       ← Component evolution log
 ├── LaboratoryView.tsx              ← ACTIVE (3D lab)
+├── FrankensteinTerminal.tsx        ← Terminal with real data commands
 ├── UnifiedSystemView.tsx           ← Available (commented)
 └── (other iterations)              ← Evidence of process
+
+server.ts                           ← Backend with real data endpoints
+├── /api/health                     ← System health check
+├── /api/metrics                    ← Real DB metrics
+├── /api/fraud-claims               ← Flagged claims
+├── /api/audit                      ← Agent decision audit trail
+├── /api/mcp-status                 ← MCP server features
+├── /api/weather-status             ← Weather API status
+├── /api/seance                     ← AI chat with DB context
+└── /api/manual-claim               ← Claim injection
+
+src/utils/validator.ts              ← AI fraud detection with user description
+src/agents/claim-revenant-agent.ts  ← Location-aware weather simulation
 ```

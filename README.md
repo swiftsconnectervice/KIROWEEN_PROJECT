@@ -40,7 +40,7 @@ FrankenStack connects **IBM AS/400 legacy systems** (1980s technology) with **mo
 | **Specs** | `.kiro/specs/` | 3 spec documents for structured development |
 | **Hooks** | `.kiro/hooks/` | 5 agent hooks for automated workflows |
 | **Steering** | `.kiro/steering/` | 3 docs for consistent AI behavior |
-| **MCP** | `.kiro/mcp/` | GitHub auto-commit integration |
+| **MCP** | `.kiro/mcp/` | AS/400 MCP server documentation |
 | **Vibe Coding** | `.kiro/prompts/` | Rapid prototyping evidence |
 
 📖 **Full write-up:** [KIRO-WRITEUP.md](./KIRO-WRITEUP.md)
@@ -134,9 +134,11 @@ Copy `.env.example` to `.env` and configure:
 ```env
 OPENAI_API_KEY=sk-...          # Required
 OPENWEATHER_API_KEY=...        # Optional (falls back to simulation)
-GITHUB_PERSONAL_ACCESS_TOKEN=  # Optional (for auto-commit)
+DATABASE_URL=file:./dev.db     # SQLite database path
 PORT=4000                      # Optional
 ```
+
+> **Note:** Agent decisions are logged to the SQLite database (`AuditLog` table) for full traceability. Use the `audit` command in the terminal to view the decision history.
 
 ---
 

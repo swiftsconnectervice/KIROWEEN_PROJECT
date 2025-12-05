@@ -17,7 +17,7 @@ export interface MockClaim {
   location: string;
   
   /** Type of damage claimed */
-  damageType: 'Hurricane' | 'Fire' | 'Theft' | 'Vandalism';
+  damageType: 'Hurricane' | 'Fire' | 'Flood' | 'Theft' | 'Vandalism';
   
   /** Date of loss, randomly generated within last 30 days */
   date: Date;
@@ -30,6 +30,9 @@ export interface MockClaim {
   
   /** Current status of the claim */
   status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'DENIED' | 'SUBMIT_FAILED' | 'ERROR';
+  
+  /** User's description of the damage (optional) */
+  description?: string;
 }
 
 /**

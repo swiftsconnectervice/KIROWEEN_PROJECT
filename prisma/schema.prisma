@@ -3,10 +3,8 @@ generator client {
 }
 
 datasource db {
-  // SQLite for local development, PostgreSQL for production
-  // Local: DATABASE_URL="file:./dev.db"
-  // Production: DATABASE_URL="postgresql://user:pass@host:5432/db"
-  provider = "postgresql"
+  // SQLite for simplicity (data resets on each Render deploy, but OK for demo)
+  provider = "sqlite"
   url      = env("DATABASE_URL") 
 }
 
@@ -24,4 +22,15 @@ model Claim {
   aiReasoning   String?
   weatherEvent  String?
   createdAt     DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  timestamp   DateTime @default(now())
+  action      String   // CLAIM_PROCESSED, FRAUD_DETECTED, CLAIM_APPROVED, etc.
+  claimId     String?
+  decision    String?
+  hookName    String?  // on-fraud-detected, on-claim-approved, etc.
+  details     String?  // JSON string with additional context
+  source      String   @default("agent") // agent, api, system
 }

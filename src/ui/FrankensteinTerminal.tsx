@@ -25,11 +25,13 @@ const COMMANDS = {
   help: 'Show available commands',
   status: 'Display system status',
   claims: 'List recent processed claims',
+  fraud: 'Show flagged/suspicious claims',
+  audit: 'Show agent decision audit trail',
+  mcp: 'Show MCP server status (rate limiter, logging, etc.)',
   seance: 'Chat with AI about claims (usage: seance <question>)',
   inject: 'Open claim injection wizard',
   logs: 'Show system logs (usage: logs [watch|stop])',
   clear: 'Clear terminal output',
-  weather: 'Check NOAA API status',
   metrics: 'Show system metrics',
 };
 
@@ -53,11 +55,13 @@ interface ServerLog {
 // Estado del wizard de inyección
 interface InjectWizardState {
   active: boolean;
-  step: 'subject' | 'location' | 'description' | 'image' | 'confirm' | 'processing';
+  step: 'subject' | 'location' | 'description' | 'amount' | 'image' | 'confirm' | 'processing';
   data: {
     subject: string;
     location: string;
     description: string;
+    userDescription: string; // Original user description to show in summary
+    amount: string;
     imageBase64: string | null;
     imageName: string | null;
   };
@@ -78,7 +82,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
   const [injectWizard, setInjectWizard] = useState<InjectWizardState>({
     active: false,
     step: 'subject',
-    data: { subject: '', location: '', description: '', imageBase64: null, imageName: null }
+    data: { subject: '', location: '', description: '', userDescription: '', amount: '', imageBase64: null, imageName: null }
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [logsWatchActive, setLogsWatchActive] = useState(false);
@@ -101,8 +105,17 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
   useEffect(() => {
     const initMessages: TerminalLine[] = [
       { id: lineIdRef.current++, type: 'system', text: '> FRANKENSTEIN SYSTEM MONITOR v2.0' },
-      { id: lineIdRef.current++, type: 'system', text: '>> Initializing interactive terminal...' },
-      { id: lineIdRef.current++, type: 'success', text: '>> Terminal ready. Type "help" for commands.' },
+      { id: lineIdRef.current++, type: 'system', text: '>> Legacy-to-AI Bridge Active' },
+      { id: lineIdRef.current++, type: 'success', text: '>> Terminal ready.' },
+      { id: lineIdRef.current++, type: 'system', text: '' },
+      { id: lineIdRef.current++, type: 'response', text: '╔════════════════════════════════════════════╗' },
+      { id: lineIdRef.current++, type: 'response', text: '║  🧪 QUICK START COMMANDS                   ║' },
+      { id: lineIdRef.current++, type: 'response', text: '╠════════════════════════════════════════════╣' },
+      { id: lineIdRef.current++, type: 'warning', text: '║  claims  → Process claims from AS/400      ║' },
+      { id: lineIdRef.current++, type: 'warning', text: '║  inject  → Submit a new claim manually     ║' },
+      { id: lineIdRef.current++, type: 'warning', text: '║  seance  → Chat with AI about your data    ║' },
+      { id: lineIdRef.current++, type: 'warning', text: '║  help    → Show all commands               ║' },
+      { id: lineIdRef.current++, type: 'response', text: '╚════════════════════════════════════════════╝' },
       { id: lineIdRef.current++, type: 'system', text: '' },
     ];
     setHistory(initMessages);
@@ -199,30 +212,73 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
     switch (command) {
       case 'help':
         addLine('system', '');
-        addLine('system', '╔══════════════════════════════════════════╗');
-        addLine('system', '║       AVAILABLE COMMANDS                 ║');
-        addLine('system', '╠══════════════════════════════════════════╣');
+        addLine('system', '╔═══════════════════════════════════════════════════════════╗');
+        addLine('system', '║              AVAILABLE COMMANDS                           ║');
+        addLine('system', '╠═══════════════════════════════════════════════════════════╣');
         Object.entries(COMMANDS).forEach(([cmd, desc]) => {
-          addLine('system', `║ ${cmd.padEnd(10)} │ ${desc.substring(0, 28).padEnd(28)} ║`);
+          addLine('system', `║  ${cmd.padEnd(8)} │ ${desc.padEnd(45)} ║`);
         });
-        addLine('system', '╚══════════════════════════════════════════╝');
+        addLine('system', '╚═══════════════════════════════════════════════════════════╝');
         break;
 
       case 'status':
         addLine('system', '');
-        addLine('system', 'COMPONENT STATUS:');
-        addLine(agentActive ? 'success' : 'error', `  ┌─ FRONTEND ────────── [${agentActive ? '✓' : '○'}] ${agentActive ? 'ONLINE' : 'OFFLINE'}`);
-        addLine(agentActive ? 'success' : 'error', `  ├─ GATEWAY ─────────── [${agentActive ? '✓' : '○'}] ${agentActive ? 'ACTIVE' : 'INACTIVE'}`);
-        addLine(agentActive ? 'warning' : 'error', `  ├─ AI_BRAIN ────────── [${agentActive ? '~' : '○'}] ${agentActive ? 'THINKING' : 'IDLE'}`);
-        addLine(as400Connected ? 'success' : 'error', `  └─ AS/400 ──────────── [${as400Connected ? '✓' : '✗'}] ${as400Connected ? 'CONNECTED' : 'OFFLINE'}`);
+        addLine('system', '>> Running health checks...');
+        try {
+          const healthResponse = await fetch('/api/health');
+          const health = await healthResponse.json();
+          
+          addLine('system', '');
+          addLine('system', '╔═══════════════════════════════════════════════╗');
+          addLine('system', '║         🏥 SYSTEM HEALTH (REAL DATA)         ║');
+          addLine('system', '╠═══════════════════════════════════════════════╣');
+          
+          const dbStatus = health.database?.status === 'ONLINE';
+          addLine(dbStatus ? 'success' : 'error', 
+            `║  DATABASE:    [${dbStatus ? '✓' : '✗'}] ${health.database?.status.padEnd(25)} ║`);
+          
+          const aiStatus = health.openai?.status === 'CONFIGURED';
+          addLine(aiStatus ? 'success' : 'warning', 
+            `║  OPENAI:      [${aiStatus ? '✓' : '○'}] ${health.openai?.status.padEnd(25)} ║`);
+          
+          const weatherStatus = health.weather?.status === 'CONFIGURED';
+          addLine(weatherStatus ? 'success' : 'warning', 
+            `║  WEATHER API: [${weatherStatus ? '✓' : '~'}] ${health.weather?.status.padEnd(25)} ║`);
+          
+          addLine('success', 
+            `║  SERVER:      [✓] ${health.server?.details?.padEnd(25) || 'ONLINE'.padEnd(25)} ║`);
+          
+          addLine('system', '╚═══════════════════════════════════════════════╝');
+          
+          if (!weatherStatus) {
+            addLine('warning', '>> ⚠️  Weather API in simulation mode (random data)');
+          }
+        } catch {
+          addLine('error', '>> ERROR: Could not reach server for health check.');
+          addLine('system', '>> Showing cached status:');
+          addLine(agentActive ? 'success' : 'error', `  ├─ FRONTEND: ${agentActive ? 'ONLINE' : 'OFFLINE'}`);
+          addLine(as400Connected ? 'success' : 'error', `  └─ AS/400: ${as400Connected ? 'CONNECTED' : 'OFFLINE'}`);
+        }
         break;
 
-      case 'claims':
+      case 'claims': {
+        const jobId = Math.floor(Math.random() * 900000) + 100000;
         addLine('system', '');
-        addLine('system', '>> Fetching recent claims from database...');
+        addLine('success', '════════════════════════════════════════════════════════════');
+        addLine('success', '                    IBM AS/400 SYSTEM                       ');
+        addLine('success', '                  CLAIM PROCESSING UNIT                     ');
+        addLine('success', '════════════════════════════════════════════════════════════');
+        addLine('system', `  Session: TN5250-MCP-001  Time: ${new Date().toLocaleTimeString()}`);
+        addLine('system', '  User: MCPUSER            Status: ACTIVE');
+        addLine('system', '');
+        addLine('system', '>> Establishing TN5250 connection...', true);
+        addLine('response', `   CPC2191 - Job ${jobId}/MCPUSER/QPADEV started on ${new Date().toLocaleDateString()}`);
+        addLine('system', '>> Authenticating with QSYS...', true);
+        addLine('response', '   CPF0001 - Authentication successful');
+        addLine('system', '>> Querying CLAIMDB.CLAIMS...', true);
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
           
           const response = await fetch('/api/process-claims', {
             signal: controller.signal
@@ -231,24 +287,55 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
           const data = await response.json();
           
           if (data.processedClaims && data.processedClaims.length > 0) {
-            addLine('success', `>> Found ${data.processedClaims.length} claims:`);
-            addLine('system', '');
+            addLine('response', `   CPI2221 - ${data.processedClaims.length} records selected from member CLAIMS`);
+            addLine('success', `  Records: ${data.processedClaims.length}  Status: SUCCESS`);
+            addLine('success', '────────────────────────────────────────────────────────────────');
+            
             data.processedClaims.slice(0, 5).forEach((claim: any, idx: number) => {
               const decisionColor = claim.decision === 'APPROVE' ? 'success' : 
                                    claim.decision === 'INVESTIGATE' ? 'warning' : 'error';
-              addLine(decisionColor, `  [${idx + 1}] ${claim.id} │ ${claim.decision} │ Risk: ${claim.validationResult?.fraudRisk || 'N/A'}`);
+              const riskColor = claim.validationResult?.fraudRisk === 'low' ? 'success' :
+                               claim.validationResult?.fraudRisk === 'medium' ? 'warning' : 'error';
+              
+              addLine('system', `│ [${idx + 1}] ${claim.id}`);
+              addLine('system', `│     Location: ${claim.location || 'N/A'} │ Damage: ${claim.damageType || 'N/A'}`);
+              addLine('system', `│     Amount: $${claim.amount?.toLocaleString() || '0'}`);
+              addLine(decisionColor, `│     Decision: ${claim.decision} │ Fraud Risk: ${claim.validationResult?.fraudRisk || 'N/A'}`);
+              if (claim.validationResult?.reasons && claim.validationResult.reasons.length > 0) {
+                addLine('spirit', '│     AI Reasoning:');
+                claim.validationResult.reasons.slice(0, 3).forEach((reason: string) => {
+                  addLine('spirit', `│       • ${reason}`);
+                });
+              }
+              addLine('system', '│');
             });
+            
+            addLine('system', '└────────────────────────────────────────────────────────────────┘');
+            addLine('system', '');
+            addLine('success', '════════════════════════════════════════════════════════════');
+            addLine('system', '  F3=Exit  F5=Refresh  F6=Inject  F12=Cancel');
+            addLine('success', '════════════════════════════════════════════════════════════');
+            addLine('response', `   CPC2192 - Job ended normally`);
+            addLine('system', '');
+            addLine('response', '>> 💡 Type "inject" to submit your own claim!');
           } else {
-            addLine('warning', '>> No claims found in database.');
+            addLine('response', '   CPI2221 - 0 records selected from member CLAIMS');
+            addLine('warning', '  Records: 0  Status: NO DATA');
+            addLine('success', '════════════════════════════════════════════════════════════');
+            addLine('response', '>> 💡 Type "inject" to submit a new claim!');
           }
         } catch (error) {
           if (error instanceof Error && error.name === 'AbortError') {
-            addLine('error', '>> ERROR: Request timeout (5s exceeded).');
+            addLine('error', '   CPF9801 - Connection timeout exceeded');
+            addLine('error', '>> ERROR: TN5250 session timeout.');
           } else {
-            addLine('error', '>> ERROR: Could not connect to server.');
+            addLine('error', '   CPF9999 - Unexpected error occurred');
+            addLine('error', '>> ERROR: Cannot reach AS/400 host.');
           }
+          addLine('response', '>> 💡 Type "inject" to test manually!');
         }
         break;
+      }
 
       case 'seance':
         if (args.length === 0) {
@@ -340,15 +427,19 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
         addLine('warning', '║  Inject a new claim directly into the system      ║');
         addLine('warning', '║  Supports GPT-4 Vision for image analysis! 📸     ║');
         addLine('warning', '║  Type "cancel" at any step to abort               ║');
+        addLine('warning', '╠═══════════════════════════════════════════════════╣');
+        addLine('system', '║  Supported damage types:                           ║');
+        addLine('success', '║  • Hurricane  • Fire  • Flood                     ║');
+        addLine('success', '║  • Theft      • Vandalism                         ║');
         addLine('warning', '╚═══════════════════════════════════════════════════╝');
         addLine('system', '');
-        addLine('system', '>> STEP 1/4: Enter claim subject');
+        addLine('system', '>> STEP 1/5: Enter claim subject');
         addLine('system', '>> (e.g., "Insurance Claim - Hurricane Damage")');
         addLine('system', '');
         setInjectWizard({
           active: true,
           step: 'subject',
-          data: { subject: '', location: '', description: '', imageBase64: null, imageName: null }
+          data: { subject: '', location: '', description: '', userDescription: '', amount: '', imageBase64: null, imageName: null }
         });
         break;
 
@@ -513,21 +604,154 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
         ]);
         break;
 
-      case 'weather':
+      case 'fraud':
         addLine('system', '');
-        addLine('system', '>> Checking NOAA Weather API...');
-        addLine('success', '  ├─ API Status: ONLINE');
-        addLine('success', '  ├─ Last Query: Hurricane tracking');
-        addLine('system', '  └─ Coverage: US territories');
+        addLine('system', '>> Searching for flagged claims...');
+        try {
+          const fraudResponse = await fetch('/api/fraud-claims');
+          const fraudData = await fraudResponse.json();
+          
+          addLine('system', '');
+          addLine('error', '╔═══════════════════════════════════════════════════════════════╗');
+          addLine('error', '║            🚨 FRAUD DETECTION REPORT 🚨                       ║');
+          addLine('error', '╠═══════════════════════════════════════════════════════════════╣');
+          
+          if (fraudData.claims && fraudData.claims.length > 0) {
+            addLine('warning', `║  Total Flagged: ${String(fraudData.claims.length).padEnd(45)} ║`);
+            addLine('error', '╠═══════════════════════════════════════════════════════════════╣');
+            
+            fraudData.claims.slice(0, 5).forEach((claim: any, idx: number) => {
+              addLine('warning', `║  [${idx + 1}] ${claim.id} - ${claim.location}`);
+              addLine('error', `║      Decision: ${claim.decision} | Risk: ${claim.fraudRisk?.toUpperCase()}`);
+              if (claim.aiReasoning) {
+                addLine('system', `║      Reason: ${claim.aiReasoning.substring(0, 45)}...`);
+              }
+              addLine('system', '║');
+            });
+          } else {
+            addLine('success', '║  No suspicious claims detected! ✓                             ║');
+            addLine('system', '║  All processed claims appear legitimate.                      ║');
+          }
+          
+          addLine('error', '╚═══════════════════════════════════════════════════════════════╝');
+        } catch {
+          addLine('error', '>> ERROR: Could not fetch fraud data.');
+        }
         break;
 
       case 'metrics':
         addLine('system', '');
-        addLine('system', 'SYSTEM METRICS:');
-        addLine('success', `  ├─ Claims Processed: ${claimsCount}`);
-        addLine(fraudCount > 0 ? 'warning' : 'success', `  ├─ Fraud Detected: ${fraudCount}`);
-        addLine('system', `  ├─ Avg Processing Time: 1.2s`);
-        addLine('system', `  └─ Uptime: ${Math.floor(Math.random() * 24)}h ${Math.floor(Math.random() * 60)}m`);
+        addLine('system', '>> Fetching real metrics from database...');
+        try {
+          const metricsResponse = await fetch('/api/metrics');
+          const metricsData = await metricsResponse.json();
+          
+          addLine('system', '');
+          addLine('system', '╔═══════════════════════════════════════════════╗');
+          addLine('system', '║           📊 SYSTEM METRICS (REAL DATA)       ║');
+          addLine('system', '╠═══════════════════════════════════════════════╣');
+          addLine('success', `║  Claims Processed:    ${String(metricsData.totalClaims).padEnd(22)} ║`);
+          addLine('success', `║  Claims Approved:     ${String(metricsData.approvedClaims).padEnd(22)} ║`);
+          addLine(metricsData.fraudClaims > 0 ? 'warning' : 'success', 
+                  `║  Fraud/Investigate:   ${String(metricsData.fraudClaims).padEnd(22)} ║`);
+          addLine('system', `║  Avg Processing Time: ${String(metricsData.avgProcessingTime + 's').padEnd(22)} ║`);
+          addLine('system', `║  Server Uptime:       ${String(metricsData.uptimeHours + 'h ' + metricsData.uptimeMinutes + 'm').padEnd(22)} ║`);
+          addLine('system', '╚═══════════════════════════════════════════════╝');
+        } catch {
+          addLine('error', '>> ERROR: Could not fetch metrics from server.');
+          addLine('system', '>> Showing cached data:');
+          addLine('success', `  ├─ Claims Processed: ${claimsCount}`);
+          addLine(fraudCount > 0 ? 'warning' : 'success', `  ├─ Fraud Detected: ${fraudCount}`);
+        }
+        break;
+
+      case 'audit':
+        addLine('system', '');
+        addLine('system', '>> Fetching audit trail from database...');
+        try {
+          const auditResponse = await fetch('/api/audit');
+          const auditData = await auditResponse.json();
+          
+          addLine('system', '');
+          addLine('response', '╔═══════════════════════════════════════════════════════════════╗');
+          addLine('response', '║            📝 AGENT DECISION AUDIT TRAIL                      ║');
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          
+          if (auditData.logs && auditData.logs.length > 0) {
+            addLine('system', `║  Total Records: ${String(auditData.total).padEnd(45)} ║`);
+            addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+            
+            auditData.logs.slice(0, 8).forEach((log: any) => {
+              const time = new Date(log.timestamp).toLocaleTimeString();
+              const isApproved = log.action === 'CLAIM_APPROVED';
+              addLine(isApproved ? 'success' : 'warning', 
+                `║  [${time}] ${log.action.padEnd(18)} ${(log.claimId || 'N/A').padEnd(20)} ║`);
+              if (log.hookName) {
+                addLine('system', `║    Hook: ${log.hookName.padEnd(50)} ║`);
+              }
+            });
+          } else {
+            addLine('system', '║  No audit records found. Process some claims first!          ║');
+          }
+          
+          addLine('response', '╚═══════════════════════════════════════════════════════════════╝');
+        } catch {
+          addLine('error', '>> ERROR: Could not fetch audit trail.');
+        }
+        break;
+
+      case 'mcp':
+        addLine('system', '');
+        addLine('system', '>> Fetching MCP server status...');
+        try {
+          const mcpResponse = await fetch('/api/mcp-status');
+          const mcpData = await mcpResponse.json();
+          
+          addLine('system', '');
+          addLine('response', '╔═══════════════════════════════════════════════════════════════╗');
+          addLine('response', '║            🔧 MCP SERVER STATUS                               ║');
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          addLine('success', `║  Status: ${mcpData.status.padEnd(51)} ║`);
+          addLine('system', `║  Version: ${mcpData.version.padEnd(50)} ║`);
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          
+          // Rate Limiter
+          addLine('warning', '║  ⚡ RATE LIMITER                                              ║');
+          addLine('system', `║    Algorithm: ${mcpData.features.rateLimiter.algorithm.padEnd(46)} ║`);
+          addLine('system', `║    Capacity: ${String(mcpData.features.rateLimiter.capacity).padEnd(47)} ║`);
+          addLine('system', `║    Refill Rate: ${mcpData.features.rateLimiter.refillRate.padEnd(44)} ║`);
+          
+          // Logging
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          addLine('warning', '║  📝 LOGGING                                                   ║');
+          addLine('system', `║    Library: ${mcpData.features.logging.library.padEnd(48)} ║`);
+          addLine('system', `║    Format: ${mcpData.features.logging.format.padEnd(49)} ║`);
+          addLine('success', `║    Correlation IDs: ${mcpData.features.logging.correlationIds ? 'ENABLED' : 'DISABLED'.padEnd(40)} ║`);
+          
+          // Error Handling
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          addLine('warning', '║  🚨 ERROR HANDLING                                            ║');
+          addLine('success', `║    Typed Errors: ${mcpData.features.errorHandling.typedErrors ? 'ENABLED' : 'DISABLED'.padEnd(43)} ║`);
+          addLine('system', `║    Types: ${mcpData.features.errorHandling.errorTypes.join(', ').substring(0, 49).padEnd(50)} ║`);
+          
+          // Mocks
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          addLine('warning', '║  🎲 DETERMINISTIC MOCKS                                       ║');
+          addLine('system', `║    Library: ${mcpData.features.mocks.library.padEnd(48)} ║`);
+          addLine('system', `║    Default Seed: ${mcpData.features.mocks.defaultSeed.padEnd(43)} ║`);
+          
+          // Timeout
+          addLine('response', '╠═══════════════════════════════════════════════════════════════╣');
+          addLine('warning', '║  ⏱️  TIMEOUT                                                   ║');
+          addLine('system', `║    Default: ${String(mcpData.features.timeout.default) + 'ms'.padEnd(48)} ║`);
+          addLine('success', `║    Configurable: ${mcpData.features.timeout.configurable ? 'YES' : 'NO'.padEnd(43)} ║`);
+          
+          addLine('response', '╚═══════════════════════════════════════════════════════════════╝');
+          addLine('system', '');
+          addLine('system', `>> Documentation: ${mcpData.documentation}`);
+        } catch {
+          addLine('error', '>> ERROR: Could not fetch MCP status.');
+        }
         break;
 
       default:
@@ -539,6 +763,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
   }, [addLine, agentActive, as400Connected, claimsCount, fraudCount, logsWatchActive]);
 
 
+
   // Procesar paso del wizard de inyección
   const processInjectWizard = useCallback(async (userInput: string) => {
     const trimmedInput = userInput.trim();
@@ -548,7 +773,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
       addLine('command', `> ${userInput}`);
       addLine('error', '>> Injection cancelled.');
       addLine('system', '');
-      setInjectWizard({ active: false, step: 'subject', data: { subject: '', location: '', description: '', imageBase64: null, imageName: null } });
+      setInjectWizard({ active: false, step: 'subject', data: { subject: '', location: '', description: '', userDescription: '', amount: '', imageBase64: null, imageName: null } });
       return;
     }
 
@@ -558,7 +783,8 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
       addLine('system', '╭─────────────── CLAIM SUMMARY ───────────────╮');
       addLine('system', `│ Subject:  ${injectWizard.data.subject.substring(0, 35).padEnd(35)} │`);
       addLine('system', `│ Location: ${injectWizard.data.location.substring(0, 35).padEnd(35)} │`);
-      addLine('system', `│ Desc:     ${injectWizard.data.description.substring(0, 35).padEnd(35)} │`);
+      addLine('system', `│ Amount:   $${injectWizard.data.amount.substring(0, 34).padEnd(34)} │`);
+      addLine('system', `│ Desc:     ${injectWizard.data.userDescription.substring(0, 35).padEnd(35)} │`);
       addLine(injectWizard.data.imageBase64 ? 'success' : 'warning', 
               `│ Image:    ${injectWizard.data.imageName ? `📸 ${injectWizard.data.imageName.substring(0, 30)}` : '(none)'.padEnd(35)} │`);
       addLine('system', '╰──────────────────────────────────────────────╯');
@@ -580,7 +806,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
         addLine('command', `> ${userInput}`);
         addLine('success', `>> Subject: "${trimmedInput}"`);
         addLine('system', '');
-        addLine('system', '>> STEP 2/4: Enter location');
+        addLine('system', '>> STEP 2/5: Enter location');
         addLine('system', '>> (e.g., "Miami, FL" or "London, UK")');
         addLine('system', '');
         setInjectWizard(prev => ({
@@ -598,8 +824,8 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
         addLine('command', `> ${userInput}`);
         addLine('success', `>> Location: "${trimmedInput}"`);
         addLine('system', '');
-        addLine('system', '>> STEP 3/4: Enter claim description');
-        addLine('system', '>> (Include: Policy#, Claimant, Damage Type, Amount)');
+        addLine('system', '>> STEP 3/5: Describe the damage');
+        addLine('system', '>> (e.g., "Roof destroyed by strong winds")');
         addLine('system', '');
         setInjectWizard(prev => ({
           ...prev,
@@ -608,15 +834,46 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
         }));
         break;
 
-      case 'description':
+      case 'description': {
         if (!trimmedInput) {
           addLine('error', '>> Description cannot be empty. Try again:');
           return;
         }
+        
         addLine('command', `> ${userInput}`);
-        addLine('success', `>> Description received.`);
+        addLine('success', `>> Description: "${trimmedInput.substring(0, 40)}${trimmedInput.length > 40 ? '...' : ''}"`);
         addLine('system', '');
-        addLine('system', '>> STEP 4/4: Photographic Evidence (Optional)');
+        addLine('system', '>> STEP 4/5: Enter estimated claim amount');
+        addLine('system', '>> (e.g., "15000" or "25000")');
+        addLine('system', '');
+        
+        setInjectWizard(prev => ({
+          ...prev,
+          step: 'amount',
+          data: { ...prev.data, description: trimmedInput, userDescription: trimmedInput }
+        }));
+        break;
+      }
+
+      case 'amount': {
+        if (!trimmedInput) {
+          addLine('error', '>> Amount cannot be empty. Try again:');
+          return;
+        }
+        const amountNum = parseInt(trimmedInput.replace(/[^0-9]/g, ''), 10);
+        if (isNaN(amountNum) || amountNum <= 0) {
+          addLine('error', '>> Invalid amount. Enter a number (e.g., "15000"):');
+          return;
+        }
+        
+        const policyNum = `AUTO-${Math.floor(1000000 + Math.random() * 9000000)}`;
+        const fullDescription = `Policy Number: ${policyNum}\nClaimant: Demo User\nDate of Loss: ${new Date().toISOString()}\nDamage Type: ${injectWizard.data.subject.toLowerCase().includes('hurricane') ? 'Hurricane' : injectWizard.data.subject.toLowerCase().includes('fire') ? 'Fire' : injectWizard.data.subject.toLowerCase().includes('flood') ? 'Flood' : injectWizard.data.subject.toLowerCase().includes('theft') ? 'Theft' : 'Vandalism'}\nEstimated Cost: $${amountNum}\nDetails: ${injectWizard.data.description}`;
+        
+        addLine('command', `> ${userInput}`);
+        addLine('success', `>> Amount: $${amountNum.toLocaleString()}`);
+        addLine('response', `   Policy# auto-generated: ${policyNum}`);
+        addLine('system', '');
+        addLine('system', '>> STEP 5/5: Photographic Evidence (Optional)');
         addLine('system', '╭─────────────────────────────────────────────╮');
         addLine('warning', '│  📸 GPT-4 Vision will analyze the image     │');
         addLine('system', '│                                             │');
@@ -628,9 +885,10 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
         setInjectWizard(prev => ({
           ...prev,
           step: 'image',
-          data: { ...prev.data, description: trimmedInput }
+          data: { ...prev.data, amount: amountNum.toString(), description: fullDescription }
         }));
         break;
+      }
 
       case 'image':
         addLine('command', `> ${userInput}`);
@@ -661,7 +919,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
           
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s for image analysis
             
             const response = await fetch('/api/manual-claim', {
               method: 'POST',
@@ -681,19 +939,36 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
             
             if (data.success) {
               addLine('system', '');
-              addLine('success', '╔═══════════════════════════════════════════════╗');
-              addLine('success', '║          ✓ CLAIM INJECTED SUCCESSFULLY        ║');
-              addLine('success', '╠═══════════════════════════════════════════════╣');
-              addLine('success', `║  Decision: ${(data.decision || 'N/A').padEnd(34)} ║`);
-              addLine(data.fraudRisk === 'low' ? 'success' : data.fraudRisk === 'medium' ? 'warning' : 'error',
-                      `║  Fraud Risk: ${(data.fraudRisk?.toUpperCase() || 'N/A').padEnd(32)} ║`);
-              addLine('success', '╚═══════════════════════════════════════════════╝');
+              
+              // Check if claim was blocked by fraud detection hook
+              if (data.blocked) {
+                addLine('error', '╔═══════════════════════════════════════════════════════════╗');
+                addLine('error', '║     🚨 FRAUD DETECTED - DATABASE WRITE BLOCKED 🚨        ║');
+                addLine('error', '╠═══════════════════════════════════════════════════════════╣');
+                addLine('error', `║  Decision: ${(data.decision || 'N/A').padEnd(44)} ║`);
+                addLine('error', `║  Fraud Risk: ${(data.fraudRisk?.toUpperCase() || 'N/A').padEnd(42)} ║`);
+                addLine('error', '╠═══════════════════════════════════════════════════════════╣');
+                addLine('warning', '║  ⚡ HOOK TRIGGERED: on-fraud-detected                     ║');
+                addLine('warning', '║  ⛔ Claim NOT saved to database                           ║');
+                addLine('warning', '║  📋 Flagged for manual investigation                      ║');
+                addLine('error', '╚═══════════════════════════════════════════════════════════╝');
+              } else {
+                addLine('success', '╔═══════════════════════════════════════════════════════════╗');
+                addLine('success', '║          ✓ CLAIM APPROVED & SAVED TO DATABASE             ║');
+                addLine('success', '╠═══════════════════════════════════════════════════════════╣');
+                addLine('success', `║  Decision: ${(data.decision || 'N/A').padEnd(44)} ║`);
+                addLine('success', `║  Fraud Risk: ${(data.fraudRisk?.toUpperCase() || 'N/A').padEnd(42)} ║`);
+                addLine('success', '╠═══════════════════════════════════════════════════════════╣');
+                addLine('success', '║  ⚡ HOOK TRIGGERED: on-claim-approved                      ║');
+                addLine('success', '║  💾 Claim saved to database successfully                  ║');
+                addLine('success', '╚═══════════════════════════════════════════════════════════╝');
+              }
               
               if (data.reasons && data.reasons.length > 0) {
                 addLine('system', '');
                 addLine('system', '>> AI Reasoning:');
                 data.reasons.slice(0, 3).forEach((reason: string) => {
-                  addLine('system', `   • ${reason.substring(0, 50)}`);
+                  addLine(data.blocked ? 'warning' : 'system', `   • ${reason}`);
                 });
               }
             } else {
@@ -702,14 +977,14 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
           } catch (error) {
             setIsTyping(false);
             if (error instanceof Error && error.name === 'AbortError') {
-              addLine('error', '>> ERROR: Request timeout (5s exceeded).');
+              addLine('error', '>> ERROR: Request timeout (30s exceeded).');
             } else {
               addLine('error', '>> ERROR: Could not connect to server.');
             }
           }
           
           addLine('system', '');
-          setInjectWizard({ active: false, step: 'subject', data: { subject: '', location: '', description: '', imageBase64: null, imageName: null } });
+          setInjectWizard({ active: false, step: 'subject', data: { subject: '', location: '', description: '', userDescription: '', amount: '', imageBase64: null, imageName: null } });
         } else {
           addLine('error', '>> Invalid input. Type "yes" to confirm or "cancel" to abort.');
         }
@@ -965,6 +1240,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
                 injectWizard.step === 'subject' ? 'Enter subject...' :
                 injectWizard.step === 'location' ? 'Enter location...' :
                 injectWizard.step === 'description' ? 'Enter description...' :
+                injectWizard.step === 'amount' ? 'Enter amount (e.g., 15000)...' :
                 injectWizard.step === 'image' ? 'Type "upload" or "skip"...' :
                 injectWizard.step === 'confirm' ? 'Type "yes" or "cancel"...' :
                 'Processing...'

@@ -2,6 +2,7 @@
 logs
 *.log
 npm-debug.log*
+!.kiro/logs/
 
 # Dependencias
 node_modules/
@@ -23,7 +24,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# Environment Variables (¡Seguridad!)
+# Environment Variables (ï¿½Seguridad!)
 .env
 .env.local
 .env.*.local

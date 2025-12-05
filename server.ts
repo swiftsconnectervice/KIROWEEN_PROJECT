@@ -5,6 +5,16 @@ import path from 'path';
 import { PrismaClient } from '@prisma/client'; // <-- El cliente de Base de Datos
 import { ClaimRevenantAgent } from './src/agents/claim-revenant-agent';
 import OpenAI from 'openai';
+import { execSync } from 'child_process';
+
+// Initialize database tables before starting
+console.log('🔧 [Server] Initializing database...');
+try {
+  execSync('npx prisma db push --skip-generate', { stdio: 'inherit' });
+  console.log('✅ [Server] Database tables ready');
+} catch (err) {
+  console.error('⚠️ [Server] Database init warning:', err);
+}
 
 const app = express();
 const port = process.env.PORT || 4000;

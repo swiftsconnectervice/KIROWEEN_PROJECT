@@ -47,7 +47,7 @@ export const FrankenStackDashboard: React.FC = () => {
 
   // Conexión con el motor
   useEffect(() => {
-    const apiUrl = 'http://localhost:4000/api/process-claims';
+    const apiUrl = '/api/process-claims';
 
     fetch(apiUrl)
       .then((response) => {

@@ -224,7 +224,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
           
-          const response = await fetch('http://localhost:4000/api/process-claims', {
+          const response = await fetch('/api/process-claims', {
             signal: controller.signal
           });
           clearTimeout(timeoutId);
@@ -280,7 +280,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
             
-            const response = await fetch('http://localhost:4000/api/seance', {
+            const response = await fetch('/api/seance', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ question }),
@@ -379,7 +379,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
                   const controller = new AbortController();
                   const timeoutId = setTimeout(() => controller.abort(), 5000);
                   
-                  const response = await fetch('http://localhost:4000/api/system-logs', {
+                  const response = await fetch('/api/system-logs', {
                     signal: controller.signal
                   });
                   clearTimeout(timeoutId);
@@ -450,7 +450,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
             
-            const response = await fetch('http://localhost:4000/api/system-logs', {
+            const response = await fetch('/api/system-logs', {
               signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -663,7 +663,7 @@ export const FrankensteinTerminal: React.FC<FrankensteinTerminalProps> = ({
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
             
-            const response = await fetch('http://localhost:4000/api/manual-claim', {
+            const response = await fetch('/api/manual-claim', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

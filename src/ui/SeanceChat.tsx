@@ -44,7 +44,7 @@ export const SeanceChat: React.FC = () => {
 
     try {
       // LLAMADA REAL AL SERVIDOR
-      const response = await fetch('http://localhost:4000/api/seance', {
+      const response = await fetch('/api/seance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: userMessage.text })

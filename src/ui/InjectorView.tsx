@@ -68,7 +68,7 @@ export const InjectorView: React.FC<InjectorViewProps> = ({ onClose }) => {
     setResult(null);
 
     try {
-      const response = await fetch('http://localhost:4000/api/manual-claim', {
+      const response = await fetch('/api/manual-claim', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
